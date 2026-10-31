@@ -16,6 +16,8 @@ import workspaceRoutes from './modules/workspace/routes.js';
 import marketplaceRoutes from './modules/marketplace/routes.js';
 import planRoutes from './modules/plans/routes.js';
 import operationsRoutes from './modules/operations/routes.js';
+import billingRoutes from './modules/billing/routes.js';
+import adminRoutes from './modules/admin/routes.js';
 import * as authController from './modules/auth/controller.js';
 
 export function createApp(logger) {
@@ -67,6 +69,8 @@ export function createApp(logger) {
   app.use('/api/v1/workspace', workspaceRoutes);
   app.use('/api/v1/marketplace', marketplaceRoutes);
   app.use('/api/v1/plans', planRoutes);
+  app.use('/api/v1/billing', billingRoutes);
+  app.use('/api/v1/admin', adminRoutes);
   app.use('/api/v1', operationsRoutes);
   // Spec §11.1; profile and role-aware navigation in §14.1–14.3.
   app.get('/api/v1/me', requireAuth, async (req, res) => {

@@ -1,25 +1,35 @@
 # Backend progress
 
-## Completed
+## Implemented
 
-- **Authentication and accounts (implemented; DB integration validation pending):** implementation covers the documented auth flows and password rules in `spec.md` §6.1 and routes in §11.1. UI workflows are the customer signup/login/reset/profile flows in §13.1 and §14.1.
-- Verification emails link to the frontend confirmation page, which verifies the one-time token through the API and shows success or an actionable error. Delivery still requires working SMTP configuration.
-- **Admin user management (implemented; DB integration validation pending):** implementation covers staff administration in `spec.md` §6.1 and §11.2, used by the admin staff page in §13.3 and §14.3.
-- **Workspace reads:** authenticated role-scoped endpoint serves customers, subscriptions, invoices, payments, catalog, discounts, staff, and dashboard data to the frontend.
-- **Plans and customer marketplace (initial):** admins can publish plans; customers can request currently available plans. The API creates an invoice and queues an email with payment instructions. UPI is manual/invoice-only, without gateway collection or automatic payment reconciliation.
-- Admins can add products, plans, taxes, discounts, and invite staff. Staff/admin can create customers and quotations, confirm quotations into invoices, and record payments. Customer profiles can be edited; customers can pause, resume, or close subscriptions when plan rules permit.
-- The demo seed now creates 15 products, 20 plans, 10 sample customers, and subscription/invoice/payment records. It is idempotent and disabled in production.
-- Customer, quotation, invoice, payment, catalog, discount, subscription-action, and role-scoped workspace flows have been exercised against the local PostgreSQL database.
-- Auth schema extension migration for failed-login lockout, email verification, refresh tokens, idempotency keys, and email outbox is in `sql/0002_auth_hardening.sql`.
+- Signup, login, refresh/logout, email verification, password reset/change, staff invitations, role-scoped access, and durable email outbox delivery. Brevo's transactional API is used when configured; SMTP remains a fallback.
+- Role-scoped workspace reads, customer marketplace, subscription quotations, product variants, editable quotation templates and subscription lines, subscription detail/status history, customer quote acceptance, and renewals.
+- Admin/staff controls for pausing, resuming, closing subscriptions; editing/deactivating catalog and discount records; invoice confirmation, cancellation, email, reminders, print/PDF, payment recording, and payment receipts.
+- Recurring billing with scheduled/manual runs, catch-up, advisory locking, per-subscription transactions, billing-run history/status/errors, renewal and overdue reminders, and reconciliation checks. Non-auto-closing plans continue billing; auto-close plans are billed through their expiry before closure.
+- Invoice tax on configured product lines and eligible active discount rules, with integer-cent arithmetic and invoice snapshots. Product-scoped discounts are limited to their configured products; subscription-scoped rules apply to the subscription unless specifically assigned elsewhere.
+- Admin settings, audit log, Postgres/Redis health checks, customer account deactivation that preserves financial history, and a statistics page with missing-invoice explanations, revenue growth, and billing monitoring.
+- Focused unit coverage for invoice math and monthly/yearly date anchoring.
 
-## Remaining
+## Validation status
 
-- Run PostgreSQL migrations and verify auth endpoints against a real database.
-- Add integration tests for refresh rotation/reuse, lockout, signup races, verification/reset single use, RBAC, and email-outbox delivery.
-- Implement edits/deactivation for catalog and discount records, recurring billing, and richer subscription/invoice detail workflows.
-- Link plans to product lines and apply tax/discount rules automatically during invoice calculation.
+- Frontend production build passes.
+- Backend unit tests pass; JavaScript syntax checks and `git diff --check` pass.
+- The new subscription/billing migration has **not** been applied to a database in this work. New DB-backed routes, migration behavior, scheduler concurrency, and email delivery still need integration testing against PostgreSQL/Redis.
 
-## Open questions
+## Remaining / limitations
 
-- SMTP credentials/provider must be supplied through environment variables before email delivery can run.
-- PostgreSQL/Redis integration must be available to sign in and load workspace data.
+- UPI is an instruction-only payment method. There is no payment gateway, bank integration, automatic payment matching, or automatic payment confirmation.
+- PDF output uses the browser's print / save-as-PDF flow; the server does not generate PDFs or attach them to email.
+- Tax is based on configured product-line tax rules; jurisdiction, exemption, tax registration, and tax reporting logic are not implemented. Plans without product lines have no plan-level tax configuration.
+- Statistics show recorded cash collections and month-over-month growth, not historical MRR snapshots, churn, cohort retention, or company valuation.
+- Invoice cancellation does not provide a dedicated reissue workflow. Admin account deactivation preserves history; hard deletion and account reactivation are not exposed in the customer list.
+- Health checks cover Postgres and Redis; audit and billing histories are bounded, and broad data pagination/performance tuning remains.
+- Apply `backend/sql/0003_subscription_billing_features.sql` with `npm run db:migrate` before using the new workflows. Then validate billing, discounts, pause/resume policy, account controls, and outbox delivery against the target database.
+- Comprehensive API integration, concurrency, end-to-end, accessibility, and security testing remains.
+
+## Configuration and operational notes
+
+- Email needs `BREVO_API_KEY` and a verified `BREVO_SENDER_EMAIL`, or SMTP fallback configuration.
+- UPI instructions are optional and use `PAYMENT_UPI_ID` and `PAYMENT_PAYEE_NAME`.
+- `BUSINESS_TIMEZONE` controls scheduled billing and reminders; it defaults to `Asia/Kolkata`.
+- `npm run seed:demo` is explicit, repeatable, and disabled in production. It reads `DEMO_SEED_PASSWORD` from the backend environment and never prints it.

@@ -4,6 +4,7 @@ import { requireAuth, requireRole } from '../../middleware/auth.js';
 import { validate } from '../../middleware/validate.js';
 import {
   confirmQuotation,
+  deactivateCatalogRecord,
   createDiscount,
   createProduct,
   createTax,
@@ -11,8 +12,25 @@ import {
   createCustomer,
   createQuotation,
   recordPayment,
+  updateProduct,
+  updateDiscount,
+  updateTax,
   updateCustomerProfile,
 } from './service.js';
+import {
+  cancelInvoice,
+  confirmInvoice,
+  createProductVariant,
+  deactivateQuotationTemplate,
+  emailInvoice,
+  getInvoiceDetails,
+  getSubscriptionDetails,
+  listQuotationTemplates,
+  renewSubscription,
+  replaceSubscriptionLines,
+  saveQuotationTemplate,
+  updateProductVariant,
+} from './workflows.js';
 
 const router = Router();
 const idParams = z.object({ id: z.string().regex(/^[1-9]\d*$/) }).strict();
@@ -36,6 +54,31 @@ const profileSchema = z.object({
 const quotationSchema = z.object({
   customer_id: z.string().regex(/^[1-9]\d*$/),
   plan_id: z.string().regex(/^[1-9]\d*$/),
+  template_id: z.string().regex(/^[1-9]\d*$/).nullable().optional(),
+}).strict();
+const subscriptionLineSchema = z.object({
+  product_id: z.string().regex(/^[1-9]\d*$/),
+  variant_id: z.string().regex(/^[1-9]\d*$/).nullable().optional(),
+  quantity: z.number().int().min(1).max(100000),
+});
+const linesSchema = z.object({ lines: z.array(subscriptionLineSchema).min(1).max(100) }).strict();
+const money = z.number().finite().min(0).max(9999999999.99)
+  .refine(value => value === Number(value.toFixed(2)), 'Amount can have at most two decimal places.');
+const templateSchema = z.object({
+  name: z.string().trim().min(1).max(160),
+  plan_id: z.string().regex(/^[1-9]\d*$/),
+  validity_days: z.number().int().min(1).max(365),
+  notes: z.string().trim().max(2000).nullable(),
+  lines: z.array(subscriptionLineSchema).min(1).max(100),
+}).strict();
+const variantSchema = z.object({
+  attribute: z.string().trim().min(1).max(80),
+  value: z.string().trim().min(1).max(120),
+  extra_price: money,
+  is_active: z.boolean().optional(),
+}).strict();
+const cancelInvoiceSchema = z.object({
+  reason: z.string().trim().min(3).max(500),
 }).strict();
 const paymentSchema = z.object({
   method: z.enum(['cash', 'card', 'bank_transfer', 'upi', 'cheque', 'other']),
@@ -48,8 +91,10 @@ const paymentSchema = z.object({
 const subscriptionActionSchema = z.object({
   action: z.enum(['pause', 'resume', 'close']),
 }).strict();
-const money = z.number().finite().min(0).max(9999999999.99)
-  .refine(value => value === Number(value.toFixed(2)), 'Amount can have at most two decimal places.');
+const catalogTypeParams = z.object({
+  type: z.enum(['products', 'taxes', 'discounts']),
+  id: z.string().regex(/^[1-9]\d*$/),
+}).strict();
 const productSchema = z.object({
   name: z.string().trim().min(1).max(160),
   type: z.enum(['service', 'software', 'add_on', 'goods']),
@@ -102,12 +147,72 @@ router.post('/products', requireAuth, requireRole('admin'), validate({ body: pro
   res.status(201).json({ data: await createProduct(req.validated.body, req.auth.userId) });
 });
 
+router.post('/products/:id/variants', requireAuth, requireRole('admin'), validate({
+  params: idParams,
+  body: variantSchema.omit({ is_active: true }),
+}), async (req, res) => {
+  res.status(201).json({
+    data: await createProductVariant(req.validated.params.id, req.validated.body, req.auth.userId),
+  });
+});
+
+router.patch('/products/:id/variants/:variantId', requireAuth, requireRole('admin'), validate({
+  params: z.object({ id: z.string().regex(/^[1-9]\d*$/), variantId: z.string().regex(/^[1-9]\d*$/) }).strict(),
+  body: variantSchema.extend({ is_active: z.boolean() }),
+}), async (req, res) => {
+  res.json({
+    data: await updateProductVariant(
+      req.validated.params.id, req.validated.params.variantId, req.validated.body, req.auth.userId,
+    ),
+  });
+});
+
+router.get('/quotation-templates', requireAuth, requireRole('admin', 'staff'), async (_req, res) => {
+  res.json({ data: await listQuotationTemplates() });
+});
+
+router.post('/quotation-templates', requireAuth, requireRole('admin', 'staff'), validate({ body: templateSchema }), async (req, res) => {
+  res.status(201).json({ data: await saveQuotationTemplate(req.validated.body, req.auth.userId) });
+});
+
+router.patch('/quotation-templates/:id', requireAuth, requireRole('admin', 'staff'), validate({
+  params: idParams,
+  body: templateSchema,
+}), async (req, res) => {
+  res.json({
+    data: await saveQuotationTemplate(req.validated.body, req.auth.userId, req.validated.params.id),
+  });
+});
+
+router.post('/quotation-templates/:id/deactivate', requireAuth, requireRole('admin', 'staff'), validate({
+  params: idParams,
+}), async (req, res) => {
+  res.json({ data: await deactivateQuotationTemplate(req.validated.params.id, req.auth.userId) });
+});
+
 router.post('/taxes', requireAuth, requireRole('admin'), validate({ body: taxSchema }), async (req, res) => {
   res.status(201).json({ data: await createTax(req.validated.body, req.auth.userId) });
 });
 
+router.patch('/products/:id', requireAuth, requireRole('admin'), validate({ params: idParams, body: productSchema }), async (req, res) => {
+  res.json({ data: await updateProduct(req.validated.params.id, req.validated.body, req.auth.userId) });
+});
+
+router.patch('/taxes/:id', requireAuth, requireRole('admin'), validate({ params: idParams, body: taxSchema }), async (req, res) => {
+  res.json({ data: await updateTax(req.validated.params.id, req.validated.body, req.auth.userId) });
+});
+
+router.post('/:type/:id/deactivate', requireAuth, requireRole('admin'), validate({ params: catalogTypeParams }), async (req, res) => {
+  const type = { products: 'product', taxes: 'tax', discounts: 'discount' }[req.validated.params.type];
+  res.json({ data: await deactivateCatalogRecord(type, req.validated.params.id, req.auth.userId) });
+});
+
 router.post('/discounts', requireAuth, requireRole('admin'), validate({ body: discountSchema }), async (req, res) => {
   res.status(201).json({ data: await createDiscount(req.validated.body, req.auth.userId) });
+});
+
+router.patch('/discounts/:id', requireAuth, requireRole('admin'), validate({ params: idParams, body: discountSchema }), async (req, res) => {
+  res.json({ data: await updateDiscount(req.validated.params.id, req.validated.body, req.auth.userId) });
 });
 
 router.patch('/me/customer', requireAuth, requireRole('customer'), validate({ body: profileSchema }), async (req, res) => {
@@ -119,8 +224,31 @@ router.post('/subscriptions', requireAuth, requireRole('admin', 'staff'), valida
   res.status(201).json({ data: quotation });
 });
 
+router.get('/subscriptions/:id', requireAuth, requireRole('admin', 'staff', 'customer'), validate({ params: idParams }), async (req, res) => {
+  res.json({ data: await getSubscriptionDetails(req.validated.params.id, req.auth.role, req.auth.userId) });
+});
+
+router.patch('/subscriptions/:id/lines', requireAuth, requireRole('admin', 'staff'), validate({
+  params: idParams,
+  body: linesSchema,
+}), async (req, res) => {
+  res.json({
+    data: await replaceSubscriptionLines(
+      req.validated.params.id, req.validated.body.lines, req.auth.userId, req.auth.role,
+    ),
+  });
+});
+
 router.post('/subscriptions/:id/confirm', requireAuth, requireRole('admin', 'staff'), validate({ params: idParams }), async (req, res) => {
-  res.json({ data: await confirmQuotation(req.validated.params.id, req.auth.userId) });
+  res.json({ data: await confirmQuotation(req.validated.params.id, req.auth.userId, req.auth.role) });
+});
+
+router.post('/subscriptions/:id/accept', requireAuth, requireRole('customer'), validate({ params: idParams }), async (req, res) => {
+  res.json({ data: await confirmQuotation(req.validated.params.id, req.auth.userId, req.auth.role) });
+});
+
+router.post('/subscriptions/:id/renew', requireAuth, requireRole('admin', 'staff', 'customer'), validate({ params: idParams }), async (req, res) => {
+  res.status(201).json({ data: await renewSubscription(req.validated.params.id, req.auth.userId, req.auth.role) });
 });
 
 router.post('/subscriptions/:id/action', requireAuth, requireRole('admin', 'staff', 'customer'), validate({ params: idParams, body: subscriptionActionSchema }), async (req, res) => {
@@ -130,6 +258,37 @@ router.post('/subscriptions/:id/action', requireAuth, requireRole('admin', 'staf
 router.post('/invoices/:id/payments', requireAuth, requireRole('admin', 'staff'), validate({ params: idParams, body: paymentSchema }), async (req, res) => {
   const payment = await recordPayment(req.validated.params.id, req.validated.body, req.auth.userId);
   res.status(201).json({ data: payment });
+});
+
+router.get('/invoices/:id', requireAuth, requireRole('admin', 'staff', 'customer'), validate({ params: idParams }), async (req, res) => {
+  res.json({ data: await getInvoiceDetails(req.validated.params.id, req.auth.userId, req.auth.role) });
+});
+
+router.post('/invoices/:id/cancel', requireAuth, requireRole('admin', 'staff'), validate({
+  params: idParams,
+  body: cancelInvoiceSchema,
+}), async (req, res) => {
+  res.json({
+    data: await cancelInvoice(req.validated.params.id, req.validated.body.reason, req.auth.userId),
+  });
+});
+
+router.post('/invoices/:id/confirm', requireAuth, requireRole('admin', 'staff'), validate({
+  params: idParams,
+}), async (req, res) => {
+  res.json({ data: await confirmInvoice(req.validated.params.id, req.auth.userId) });
+});
+
+router.post('/invoices/:id/send', requireAuth, requireRole('admin', 'staff'), validate({
+  params: idParams,
+}), async (req, res) => {
+  res.json({ data: await emailInvoice(req.validated.params.id, req.auth.userId) });
+});
+
+router.post('/invoices/:id/reminder', requireAuth, requireRole('admin', 'staff'), validate({
+  params: idParams,
+}), async (req, res) => {
+  res.json({ data: await emailInvoice(req.validated.params.id, req.auth.userId, 'reminder') });
 });
 
 export default router;

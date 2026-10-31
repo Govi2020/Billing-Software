@@ -7,12 +7,12 @@
     font-synthesis: none;
     text-rendering: optimizeLegibility;
     font-weight: 400;
-    --ink: #25332e;
-    --muted: #82908a;
-    --line: #e8ece9;
-    --green: #377b63;
-    --green-dark: #28634f;
-    --canvas: #f5f6f4;
+    --ink: #21332f;
+    --muted: #6f817b;
+    --line: #e1e9e6;
+    --green: #168a72;
+    --green-dark: #08735e;
+    --canvas: #f2f7f6;
     --white: #fff;
 }
 * {
@@ -239,6 +239,107 @@ a {
     margin-left: auto;
     color: #77847d;
     font-size: 18px;
+}
+
+.search-clear {
+    border: 0;
+    background: #eaf3f1;
+    color: #267c6d;
+    border-radius: 50%;
+    width: 20px;
+    height: 20px;
+    line-height: 18px;
+    padding: 0;
+    flex: none;
+    font-size: 15px;
+}
+
+.button.danger {
+    color: #a93c4c;
+    border-color: #f0cbd0;
+    background: #fff7f7;
+}
+
+.button.danger:hover {
+    border-color: #d78a94;
+    background: #fff0f1;
+}
+
+.row-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.row-actions .button {
+    white-space: nowrap;
+}
+
+.table-panel,
+.metric-card,
+.chart-panel,
+.attention-panel,
+.pipeline,
+.plan-form,
+.marketplace-card {
+    box-shadow: 0 5px 18px rgb(34 76 67 / 4%);
+}
+
+.page-heading h1 {
+    color: #183e3c;
+}
+
+.metric-card:nth-child(1) .metric-icon {
+    background: #e4f4ef;
+    color: #13856c;
+}
+
+.metric-card:nth-child(2) .metric-icon {
+    background: #e9f1fb;
+    color: #4775b8;
+}
+
+.metric-card:nth-child(3) .metric-icon {
+    background: #fff2df;
+    color: #b67a23;
+}
+
+.metric-card:nth-child(4) .metric-icon {
+    background: #fce9e9;
+    color: #bd5258;
+}
+
+.panel-title {
+    background: linear-gradient(90deg, #f8fcfb, #fff 70%);
+}
+
+th {
+    color: #657972;
+    font-size: 9px;
+    background: #f5faf8;
+}
+
+td {
+    color: #4c6059;
+    font-size: 11px;
+}
+
+.button,
+.nav-link,
+.text-button {
+    transition:
+        background-color 140ms ease,
+        border-color 140ms ease,
+        color 140ms ease,
+        box-shadow 140ms ease;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible {
+    outline: 3px solid rgb(38 145 121 / 35%);
+    outline-offset: 2px;
 }
 .main-area {
     margin-left: 248px;
@@ -1572,5 +1673,191 @@ td b {
     }
     .aside-foot {
         display: none;
+    }
+}
+
+/* Keep dense operational data legible without forcing tiny dashboard text. */
+.table-panel,
+.metric-card,
+.attention-panel,
+.pipeline,
+.chart-panel {
+    border-radius: 12px;
+}
+
+.metric-card {
+    min-height: 132px;
+    padding: 18px;
+}
+
+.metric-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: #64746c;
+}
+
+.metric-value {
+    font-size: clamp(20px, 2vw, 25px);
+}
+
+.metric-foot {
+    font-size: 11px;
+    line-height: 1.45;
+}
+
+.panel-title h2 {
+    font-size: 14px;
+}
+
+.list-toolbar {
+    gap: 16px;
+    min-height: 56px;
+    padding: 14px 18px;
+    font-size: 12px;
+}
+
+.list-toolbar > div {
+    display: grid;
+    gap: 4px;
+}
+
+.list-toolbar span {
+    color: var(--muted);
+    font-size: 11px;
+}
+
+th {
+    font-size: 10px;
+    letter-spacing: 0.65px;
+    padding: 12px 16px;
+}
+
+td {
+    font-size: 12px;
+    line-height: 1.45;
+    padding: 13px 16px;
+}
+
+.badge {
+    font-size: 10px;
+    padding: 5px 8px;
+}
+
+.row-actions,
+.account-actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 7px;
+    white-space: normal;
+}
+
+.row-actions .button,
+.account-actions .button {
+    white-space: nowrap;
+}
+
+.invoice-summary {
+    margin-bottom: 18px;
+}
+
+.invoice-list-panel {
+    overflow: hidden;
+}
+
+.invoice-list-panel .table-wrap table {
+    min-width: 980px;
+}
+
+.invoice-toolbar {
+    align-items: center;
+    border-bottom: 1px solid #edf0ee;
+}
+
+.filter-select {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: auto;
+    color: #687970;
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.filter-select select {
+    min-height: 36px;
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    padding: 0 30px 0 10px;
+    background: #fff;
+    color: var(--ink);
+    font: inherit;
+}
+
+.amount-due {
+    color: #a64e3c;
+    font-weight: 700;
+}
+
+.payment-amount {
+    color: #27664f;
+    font-weight: 700;
+}
+
+.account-actions {
+    min-width: 170px;
+}
+
+.account-actions .badge {
+    min-width: 58px;
+    text-align: center;
+}
+
+.attention-item b {
+    font-size: 12px;
+}
+
+.attention-item p,
+.billing-health p,
+.pipeline-bars > div {
+    font-size: 11px;
+}
+
+.button.small {
+    font-size: 11px;
+    padding: 8px 11px;
+}
+
+@media (max-width: 700px) {
+    .metric-card {
+        min-height: 122px;
+        padding: 13px;
+    }
+
+    .metric-label {
+        font-size: 11px;
+    }
+
+    .metric-value {
+        font-size: 18px;
+    }
+
+    .metric-foot {
+        font-size: 10px;
+    }
+
+    th,
+    td {
+        padding: 11px 12px;
+    }
+
+    .list-toolbar {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .filter-select {
+        margin-left: 0;
     }
 }

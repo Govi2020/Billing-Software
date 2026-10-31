@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { requireAuth, requireRole } from '../../middleware/auth.js';
 import { validate } from '../../middleware/validate.js';
-import { createPlan } from './service.js';
+import { createPlan, deactivatePlan, updatePlan } from './service.js';
 
 const router = Router();
 const planSchema = z.object({
@@ -25,6 +25,14 @@ const planSchema = z.object({
 router.post('/', requireAuth, requireRole('admin'), validate({ body: planSchema }), async (req, res) => {
   const plan = await createPlan(req.auth.userId, req.validated.body);
   res.status(201).json({ data: plan });
+});
+
+router.patch('/:id', requireAuth, requireRole('admin'), validate({ params: z.object({ id: z.string().regex(/^[1-9]\d*$/) }), body: planSchema }), async (req, res) => {
+  res.json({ data: await updatePlan(req.auth.userId, req.validated.params.id, req.validated.body) });
+});
+
+router.post('/:id/deactivate', requireAuth, requireRole('admin'), validate({ params: z.object({ id: z.string().regex(/^[1-9]\d*$/) }) }), async (req, res) => {
+  res.json({ data: await deactivatePlan(req.auth.userId, req.validated.params.id) });
 });
 
 export default router;

@@ -16,6 +16,7 @@ async function request(path, { token, ...options } = {}) {
   if (!response.ok) {
     const error = new Error(result.error?.message || 'The request could not be completed.');
     error.status = response.status;
+    error.data = result.data;
     throw error;
   }
   return result.data;
@@ -39,6 +40,19 @@ export const api = {
     body: JSON.stringify(details),
   }),
   verifyEmail: token => request(`/auth/verify-email?${new URLSearchParams({ token })}`),
+  forgotPassword: email => request('/auth/forgot-password', {
+    method: 'POST',
+    body: JSON.stringify({ email }),
+  }),
+  resetPassword: (token, newPassword) => request('/auth/reset-password', {
+    method: 'POST',
+    body: JSON.stringify({ token, newPassword }),
+  }),
+  changePassword: (token, currentPassword, newPassword) => request('/auth/change-password', {
+    method: 'POST',
+    token,
+    body: JSON.stringify({ currentPassword, newPassword }),
+  }),
   subscribe: (token, planId) => request(`/marketplace/plans/${planId}/subscribe`, {
     method: 'POST',
     token,
@@ -48,8 +62,22 @@ export const api = {
     token,
     body: JSON.stringify(plan),
   }),
+  updatePlan: (token, planId, plan) => request(`/plans/${planId}`, {
+    method: 'PATCH',
+    token,
+    body: JSON.stringify(plan),
+  }),
+  deactivatePlan: (token, planId) => request(`/plans/${planId}/deactivate`, {
+    method: 'POST',
+    token,
+  }),
   createProduct: (token, product) => request('/products', {
     method: 'POST',
+    token,
+    body: JSON.stringify(product),
+  }),
+  updateProduct: (token, productId, product) => request(`/products/${productId}`, {
+    method: 'PATCH',
     token,
     body: JSON.stringify(product),
   }),
@@ -58,8 +86,47 @@ export const api = {
     token,
     body: JSON.stringify(tax),
   }),
+  updateTax: (token, taxId, tax) => request(`/taxes/${taxId}`, {
+    method: 'PATCH',
+    token,
+    body: JSON.stringify(tax),
+  }),
+  deactivateCatalogRecord: (token, type, id) => {
+    const collection = { product: 'products', tax: 'taxes', discount: 'discounts' }[type];
+    return request(`/${collection}/${id}/deactivate`, { method: 'POST', token });
+  },
+  createProductVariant: (token, productId, variant) => request(`/products/${productId}/variants`, {
+    method: 'POST',
+    token,
+    body: JSON.stringify(variant),
+  }),
+  updateProductVariant: (token, productId, variantId, variant) => request(`/products/${productId}/variants/${variantId}`, {
+    method: 'PATCH',
+    token,
+    body: JSON.stringify(variant),
+  }),
+  quotationTemplates: token => request('/quotation-templates', { token }),
+  createQuotationTemplate: (token, template) => request('/quotation-templates', {
+    method: 'POST',
+    token,
+    body: JSON.stringify(template),
+  }),
+  updateQuotationTemplate: (token, templateId, template) => request(`/quotation-templates/${templateId}`, {
+    method: 'PATCH',
+    token,
+    body: JSON.stringify(template),
+  }),
+  deactivateQuotationTemplate: (token, templateId) => request(`/quotation-templates/${templateId}/deactivate`, {
+    method: 'POST',
+    token,
+  }),
   createDiscount: (token, discount) => request('/discounts', {
     method: 'POST',
+    token,
+    body: JSON.stringify(discount),
+  }),
+  updateDiscount: (token, discountId, discount) => request(`/discounts/${discountId}`, {
+    method: 'PATCH',
     token,
     body: JSON.stringify(discount),
   }),
@@ -73,7 +140,21 @@ export const api = {
     token,
     body: JSON.stringify(quotation),
   }),
+  subscriptionDetails: (token, subscriptionId) => request(`/subscriptions/${subscriptionId}`, { token }),
+  updateSubscriptionLines: (token, subscriptionId, lines) => request(`/subscriptions/${subscriptionId}/lines`, {
+    method: 'PATCH',
+    token,
+    body: JSON.stringify({ lines }),
+  }),
   confirmQuotation: (token, subscriptionId) => request(`/subscriptions/${subscriptionId}/confirm`, {
+    method: 'POST',
+    token,
+  }),
+  acceptQuotation: (token, subscriptionId) => request(`/subscriptions/${subscriptionId}/accept`, {
+    method: 'POST',
+    token,
+  }),
+  renewSubscription: (token, subscriptionId) => request(`/subscriptions/${subscriptionId}/renew`, {
     method: 'POST',
     token,
   }),
@@ -86,6 +167,39 @@ export const api = {
     method: 'POST',
     token,
     body: JSON.stringify(payment),
+  }),
+  invoiceDetails: (token, invoiceId) => request(`/invoices/${invoiceId}`, { token }),
+  cancelInvoice: (token, invoiceId, reason) => request(`/invoices/${invoiceId}/cancel`, {
+    method: 'POST',
+    token,
+    body: JSON.stringify({ reason }),
+  }),
+  confirmInvoice: (token, invoiceId) => request(`/invoices/${invoiceId}/confirm`, { method: 'POST', token }),
+  sendInvoice: (token, invoiceId) => request(`/invoices/${invoiceId}/send`, { method: 'POST', token }),
+  remindInvoice: (token, invoiceId) => request(`/invoices/${invoiceId}/reminder`, { method: 'POST', token }),
+  runBilling: (token, asOfDate) => request('/billing/runs', {
+    method: 'POST',
+    token,
+    body: JSON.stringify(asOfDate ? { as_of_date: asOfDate } : {}),
+  }),
+  billingRuns: token => request('/billing/runs', { token }),
+  billingReconciliation: token => request('/billing/reconciliation', { token }),
+  adminHealth: token => request('/admin/health', { token }),
+  auditLog: token => request('/admin/audit-log', { token }),
+  updateSettings: (token, settings) => request('/admin/settings', {
+    method: 'PATCH',
+    token,
+    body: JSON.stringify(settings),
+  }),
+  deactivateUser: (token, userId, updatedAt) => request(`/users/${userId}/deactivate`, {
+    method: 'POST',
+    token,
+    headers: { 'If-Match': updatedAt },
+  }),
+  reactivateUser: (token, userId, updatedAt) => request(`/users/${userId}/reactivate`, {
+    method: 'POST',
+    token,
+    headers: { 'If-Match': updatedAt },
   }),
   updateCustomerProfile: (token, profile) => request('/me/customer', {
     method: 'PATCH',

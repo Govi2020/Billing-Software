@@ -4,6 +4,7 @@ import { pool } from './db/pool.js';
 import { redis } from './db/redis.js';
 import { createApp } from './app.js';
 import { drainEmailOutbox } from './jobs/email-outbox.js';
+import { enqueueScheduledRemindersIfNeeded, runScheduledBillingIfNeeded } from './modules/billing/service.js';
 
 const logger = pino({
   level: config.LOG_LEVEL,
@@ -19,10 +20,26 @@ const outboxTimer = setInterval(() => {
   drainEmailOutbox(logger).catch(error => logger.error({ err: error }, 'Email outbox drain failed'));
 }, 10_000);
 outboxTimer.unref();
+const billingTimer = setInterval(() => {
+  runScheduledBillingIfNeeded().catch(error => logger.error(
+    { errorCode: error.code ?? error.name },
+    'Scheduled billing run failed',
+  ));
+}, 60_000);
+billingTimer.unref();
+const reminderTimer = setInterval(() => {
+  enqueueScheduledRemindersIfNeeded().catch(error => logger.error(
+    { errorCode: error.code ?? error.name },
+    'Scheduled reminder enqueue failed',
+  ));
+}, 60_000);
+reminderTimer.unref();
 
 async function shutdown(signal) {
   logger.info({ signal }, 'Shutting down');
   clearInterval(outboxTimer);
+  clearInterval(billingTimer);
+  clearInterval(reminderTimer);
   server.close(async () => {
     await Promise.allSettled([pool.end(), redis.quit()]);
     process.exit(0);
