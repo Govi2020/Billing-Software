@@ -35,6 +35,7 @@ function sessionCookies(res, refreshToken) {
   res.cookie('brightloop_csrf', randomUUID(), {
     ...common,
     httpOnly: false,
+    path: '/',
     maxAge: refreshDays * 24 * 60 * 60 * 1000,
   });
 }
@@ -81,7 +82,7 @@ export async function signup(input) {
       await enqueueEmail(db, {
         to: email,
         template: 'email_verification',
-        payload: { full_name: user.full_name, url: `${config.API_BASE_URL}/api/v1/auth/verify-email?token=${encodeURIComponent(rawToken)}` },
+        payload: { full_name: user.full_name, url: `${config.APP_BASE_URL}/verify-email?token=${encodeURIComponent(rawToken)}` },
         dedupeKey: `verify:${user.id}:${hashToken(rawToken)}`,
       });
       return user;
@@ -235,7 +236,7 @@ export async function logout(rawToken, res) {
 export function clearSessionCookies(res) {
   const options = { httpOnly: true, secure: config.cookieSecure, sameSite: 'strict', path: '/api/v1/auth' };
   res.clearCookie(config.REFRESH_COOKIE_NAME, options);
-  res.clearCookie('brightloop_csrf', { ...options, httpOnly: false });
+  res.clearCookie('brightloop_csrf', { ...options, httpOnly: false, path: '/' });
 }
 
 export async function requestPasswordReset(emailAddress) {

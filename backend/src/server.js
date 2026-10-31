@@ -13,7 +13,6 @@ pool.on('error', error => logger.error({ errorCode: error.code ?? error.name }, 
 redis.on('error', error => logger.error({ errorCode: error.code ?? error.name }, 'Redis connection error'));
 const app = createApp(logger);
 
-await redis.connect();
 const server = app.listen(config.PORT, () => logger.info({ port: config.PORT }, 'Brightloop API listening'));
 
 const outboxTimer = setInterval(() => {

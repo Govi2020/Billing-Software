@@ -24,9 +24,19 @@ export async function sendOutboxMessage(message) {
     email_verification: 'Verify your Brightloop account',
     password_reset: 'Reset your Brightloop password',
     staff_invite: 'Your Brightloop staff account',
+    invoice_created: `Your Brightloop invoice ${payload.invoice_number}`,
   };
   const subject = subjects[template];
   if (!subject) throw new Error(`Unsupported email template: ${template}`);
+  if (template === 'invoice_created') {
+    await getTransporter().sendMail({
+      from: config.SMTP_FROM,
+      to: message.to_email,
+      subject,
+      text: `Hello${payload.full_name ? ` ${payload.full_name}` : ''},\n\nYour subscription request for ${payload.plan_name} is confirmed.\nInvoice: ${payload.invoice_number}\nAmount due: INR ${payload.amount}\nDue date: ${payload.due_date}\n\n${payload.payment_instructions}\n\nView your Brightloop account: ${payload.url}`,
+    });
+    return;
+  }
   const action = template === 'email_verification' ? 'verify your email' : 'reset your password';
   await getTransporter().sendMail({
     from: config.SMTP_FROM,

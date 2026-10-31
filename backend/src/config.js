@@ -22,6 +22,8 @@ const envSchema = z.object({
   SMTP_USER: z.string().optional(),
   SMTP_PASSWORD: z.string().optional(),
   SMTP_FROM: z.string().optional(),
+  PAYMENT_UPI_ID: z.string().max(100).optional(),
+  PAYMENT_PAYEE_NAME: z.string().max(160).optional(),
   DEMO_SEED_PASSWORD: z.string().optional(),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
 });
