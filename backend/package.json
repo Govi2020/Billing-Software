@@ -9,11 +9,14 @@
   "scripts": {
     "dev": "node --watch src/server.js",
     "start": "node src/server.js",
+    "worker": "node src/worker.js",
     "db:migrate": "node src/scripts/migrate.js",
     "seed:demo": "node src/scripts/seed-demo.js",
     "test": "node --test"
   },
   "dependencies": {
+    "argon2": "0.45.1",
+    "bullmq": "^6.5.3",
     "cookie-parser": "1.4.7",
     "cors": "2.8.6",
     "dotenv": "18.0.9",
@@ -23,11 +26,11 @@
     "ioredis": "6.0.0",
     "jsonwebtoken": "9.0.3",
     "nodemailer": "10.3.1",
+    "pdfkit": "^0.20.2",
     "pg": "8.23.1",
     "pino": "10.3.1",
     "pino-http": "11.0.0",
     "rate-limit-redis": "6.0.2",
-    "zod": "4.6.7",
-    "argon2": "0.45.1"
+    "zod": "4.6.7"
   }
 }

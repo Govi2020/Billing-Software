@@ -1,0 +1,63 @@
+name: Backend
+
+on:
+  push:
+    paths:
+      - "backend/**"
+      - "schema_new.sql"
+      - ".github/workflows/backend.yml"
+  pull_request:
+    paths:
+      - "backend/**"
+      - "schema_new.sql"
+      - ".github/workflows/backend.yml"
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: brightloop
+          POSTGRES_PASSWORD: brightloop
+          POSTGRES_DB: brightloop
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U brightloop -d brightloop"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgres://brightloop:brightloop@localhost:5432/brightloop
+      REDIS_URL: redis://localhost:6379
+      REDIS_QUEUE_URL: redis://localhost:6379
+      FRONTEND_ORIGIN: http://localhost:5173
+      APP_BASE_URL: http://localhost:5173
+      API_BASE_URL: http://localhost:4000
+      JWT_SECRET: ci-only-secret-key-that-is-longer-than-32-characters
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - run: npm run db:migrate
+      - run: npm test
+      - run: npm audit --omit=dev

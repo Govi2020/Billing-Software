@@ -41,8 +41,10 @@ try {
   await pool.query(migrationTable);
   const baseline = await readFile(fileURLToPath(new URL('../../../schema_new.sql', import.meta.url)), 'utf8');
   const authHardening = await readFile(fileURLToPath(new URL('../../sql/0002_auth_hardening.sql', import.meta.url)), 'utf8');
+  const specHardening = await readFile(fileURLToPath(new URL('../../sql/0003_spec_hardening.sql', import.meta.url)), 'utf8');
   await apply('0001_schema_new', baseline, false);
   await apply('0002_auth_hardening', authHardening);
+  await apply('0003_spec_hardening', specHardening);
 } catch (error) {
   console.error('Database migration failed:', error.code ?? error.name);
   process.exitCode = 1;

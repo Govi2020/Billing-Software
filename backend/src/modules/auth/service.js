@@ -106,8 +106,14 @@ export async function verifyEmail(rawToken) {
     if (!rows[0]) throw new AppError(422, 'INVALID_OR_EXPIRED_TOKEN', 'The verification link is invalid or expired.');
     await db.query(`UPDATE users SET email_verified_at = now() WHERE id = $1`, [rows[0].user_id]);
     await db.query(
-      `UPDATE customers SET user_id = $1
-        WHERE lower(email) = (SELECT lower(email) FROM users WHERE id = $1) AND user_id IS NULL`,
+      `WITH customer_to_link AS (
+         SELECT id FROM customers
+          WHERE lower(email) = (SELECT lower(email) FROM users WHERE id = $1)
+            AND user_id IS NULL
+          ORDER BY id LIMIT 1 FOR UPDATE
+       )
+       UPDATE customers c SET user_id=$1 FROM customer_to_link match
+        WHERE c.id=match.id`,
       [rows[0].user_id],
     );
     return { verified: true };

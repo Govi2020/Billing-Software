@@ -12,6 +12,12 @@ import { globalRateLimit } from './middleware/global-rate-limit.js';
 import { requireAuth } from './middleware/auth.js';
 import authRoutes from './modules/auth/routes.js';
 import userRoutes from './modules/users/routes.js';
+import catalogRoutes from './modules/catalog/routes.js';
+import customerRoutes from './modules/customers/routes.js';
+import subscriptionRoutes from './modules/subscriptions/routes.js';
+import billingRoutes from './modules/billing/routes.js';
+import invoiceRoutes from './modules/invoices/routes.js';
+import reportRoutes from './modules/reports/routes.js';
 import * as authController from './modules/auth/controller.js';
 
 export function createApp(logger) {
@@ -60,6 +66,12 @@ export function createApp(logger) {
   // Spec §4.4; unknown paths share the API's standard error envelope.
   app.use('/api/v1/auth', authRoutes);
   app.use('/api/v1/users', userRoutes);
+  app.use('/api/v1', catalogRoutes);
+  app.use('/api/v1', customerRoutes);
+  app.use('/api/v1', subscriptionRoutes);
+  app.use('/api/v1', billingRoutes);
+  app.use('/api/v1', invoiceRoutes);
+  app.use('/api/v1', reportRoutes);
   // Spec §11.1; profile and role-aware navigation in §14.1–14.3.
   app.get('/api/v1/me', requireAuth, async (req, res) => {
     await authController.me(req, res);

@@ -1,0 +1,107 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: brightloop
+      POSTGRES_USER: brightloop
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-brightloop-local-only}
+    ports:
+      - "${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - brightloop-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U brightloop -d brightloop"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "${REDIS_PORT:-6380}:6379"
+    volumes:
+      - brightloop-redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  mailpit:
+    image: axllent/mailpit:v1.25
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+
+  migrate:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    command: ["npm", "run", "db:migrate"]
+    environment: &backend-env
+      NODE_ENV: development
+      PORT: 4000
+      DATABASE_URL: postgres://brightloop:${POSTGRES_PASSWORD:-brightloop-local-only}@postgres:5432/brightloop
+      REDIS_URL: redis://redis:6379
+      REDIS_QUEUE_URL: redis://redis:6379
+      FRONTEND_ORIGIN: http://localhost:5173
+      APP_BASE_URL: http://localhost:5173
+      API_BASE_URL: http://localhost:${API_PORT:-4001}
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET to a random value of at least 32 characters}
+      COOKIE_SECURE: "false"
+      SMTP_HOST: mailpit
+      SMTP_PORT: 1025
+      SMTP_SECURE: "false"
+      SMTP_FROM: Brightloop <no-reply@brightloop.local>
+      BUSINESS_TZ: Asia/Kolkata
+      BILLING_CRON: "0 2 * * *"
+      PAUSE_POLICY: shift
+      AUTO_CONFIRM_INVOICES: "false"
+      AUTO_SEND_INVOICES: "false"
+      DISCOUNT_STACKING: sequential
+      LOG_LEVEL: info
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment: *backend-env
+    ports:
+      - "${API_PORT:-4001}:4000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    command: ["npm", "run", "worker"]
+    environment: *backend-env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  brightloop-postgres:
+  brightloop-redis:

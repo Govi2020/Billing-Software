@@ -1,44 +1,40 @@
 # Remaining work
 
-This repository contains a prototype and the first authentication/user backend
-module. The following work remains before it meets the full product spec.
+Run the backend locally with `docker compose up --build` from the repository
+root; see `backend/RUNNING.md`. Backend feature modules cover the main API
+areas, but do not consider the backend production-ready until the unchecked
+database, integration, and security checks below pass.
 
 ## Backend completeness
 
-- [ ] Implement catalog administration: taxes, products/variants, plans,
-  payment terms, discounts, and quotation templates (`spec.md` §§6.2–6.3,
-  11.3–11.5).
-- [ ] Implement customers and the full subscription lifecycle, including
-  quotation creation, transitions, plan flags, ownership checks, history, and
-  lifecycle jobs (`spec.md` §§6.4, 11.6–11.7).
-- [ ] Implement recurring billing, invoice snapshots, taxes/discounts, period
-  arithmetic, locking, idempotency, retries, catch-up, and reconciliation
-  (`spec.md` §§7–9, 11.7, 11.9).
-- [ ] Implement invoice actions/PDF, payment recording and correction, outbox
-  delivery, finance reports, audit views, and dashboards (`spec.md` §§6.7–6.8,
-  11.8–11.10).
-- [ ] Connect the React prototype to the API; its sign-in and records are
-  currently client-side only (`spec.md` §15).
-- [ ] Remove the client prototype's visible hard-coded demo credentials before
-  exposing it beyond local testing.
-
-## Authentication and verification
-
+- [ ] Run migration `0003_spec_hardening.sql` and endpoint tests against
+  PostgreSQL. This environment does not have PostgreSQL or Docker installed,
+  so only syntax, unit, dependency-audit, and HTTP routing smoke checks could
+  be run here.
+- [ ] Validate the scheduled BullMQ worker, quote expiry/activation/auto-close,
+  renewal reminders, and reconciliation against a real PostgreSQL/Redis setup.
+- [ ] Complete report filter coverage and verify finance calculations against
+  the spec's definitions and seeded scenarios.
+- [ ] Exercise PDF invoice email delivery against a test mail server/provider.
+- [ ] Extend idempotency and optimistic-concurrency coverage to remaining
+  mutation endpoints; run full RBAC/IDOR and race suites.
 - [ ] Add automated PostgreSQL/Redis integration coverage for migrations and
   auth endpoints, including verification/reset one-time tokens, refresh
   rotation and reuse, lockout, duplicate signup races, and email outbox
   behavior (`spec.md` §§6.1, 8.10–8.11, 19).
-- [ ] Add table-driven RBAC and IDOR tests for all user roles, including
-  customer ownership isolation (`spec.md` §§3.3, 12, 19).
-- [ ] Add concurrency tests for race-sensitive authentication operations and
-  other money/state operations as their modules are implemented (`spec.md`
-  §§8, 19).
-- [ ] Complete review by another engineer for the auth/user module (definition
-  of done in `spec.md` Appendix D).
-- [ ] Configure the chosen SMTP provider and exercise real outbox delivery in
-  a non-production environment (`spec.md` §16).
-- [ ] Add CI that runs the required unit, integration, security, and build
-  checks (`spec.md` §§19–20).
+- [ ] Add table-driven RBAC, IDOR and concurrency coverage; complete independent
+  auth/user review (`spec.md` §§3.3, 8, 12, 19, Appendix D).
+- [x] Add CI workflow and a local Docker Compose run path.
+- [ ] Run the CI workflow and verify deployment setup (`spec.md` §§19–20).
+
+## Verification and operations
+
+- [ ] Add PostgreSQL/Redis integration tests for migrations and auth, including
+  verification/reset single-use, refresh rotation/reuse, lockout, signup races,
+  and outbox behavior (`spec.md` §§6.1, 8.10–8.11, 19).
+- [ ] Complete independent auth/user review (spec Appendix D).
+- [ ] Add CI for unit/integration/security/build and verify deployment setup
+  (`spec.md` §§19–20).
 
 ## Cleanup
 

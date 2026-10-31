@@ -9,17 +9,26 @@ export const pool = new pg.Pool({
   application_name: 'brightloop-api',
 });
 
-export async function withTransaction(callback) {
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    const result = await callback(client);
-    await client.query('COMMIT');
-    return result;
-  } catch (error) {
-    await client.query('ROLLBACK');
-    throw error;
-  } finally {
-    client.release();
+export async function withTransaction(callback, { retries = 0 } = {}) {
+  let attempt = 0;
+  for (;;) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const result = await callback(client);
+      await client.query('COMMIT');
+      return result;
+    } catch (error) {
+      try {
+        await client.query('ROLLBACK');
+      } catch {
+        // A broken connection may no longer be able to roll the transaction back.
+      }
+      if (attempt >= retries || !['40001', '40P01'].includes(error.code)) throw error;
+      attempt++;
+      await new Promise(resolve => setTimeout(resolve, 20 * attempt));
+    } finally {
+      client.release();
+    }
   }
 }

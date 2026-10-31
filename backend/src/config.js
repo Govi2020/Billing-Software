@@ -6,6 +6,7 @@ const envSchema = z.object({
   PORT: z.coerce.number().int().min(1).max(65535).default(4000),
   DATABASE_URL: z.string().min(1),
   REDIS_URL: z.string().min(1),
+  REDIS_QUEUE_URL: z.string().min(1).optional(),
   FRONTEND_ORIGIN: z.string().url(),
   APP_BASE_URL: z.string().url(),
   API_BASE_URL: z.string().url(),
@@ -22,6 +23,24 @@ const envSchema = z.object({
   SMTP_USER: z.string().optional(),
   SMTP_PASSWORD: z.string().optional(),
   SMTP_FROM: z.string().optional(),
+  BUSINESS_TZ: z.string().default('Asia/Kolkata').refine(value => {
+    try {
+      new Intl.DateTimeFormat('en', { timeZone: value });
+      return true;
+    } catch {
+      return false;
+    }
+  }),
+  BILLING_CRON: z.string().default('0 2 * * *').refine(value => {
+    const parts = value.trim().split(/\s+/);
+    return parts.length === 5 && /^\d+$/.test(parts[0]) && /^\d+$/.test(parts[1])
+      && parts[2] === '*' && parts[3] === '*' && parts[4] === '*'
+      && Number(parts[0]) <= 59 && Number(parts[1]) <= 23;
+  }),
+  PAUSE_POLICY: z.enum(['shift', 'skip']).default('shift'),
+  AUTO_CONFIRM_INVOICES: z.enum(['true', 'false']).default('false'),
+  AUTO_SEND_INVOICES: z.enum(['true', 'false']).default('false'),
+  DISCOUNT_STACKING: z.enum(['sequential', 'best_only']).default('sequential'),
   DEMO_SEED_PASSWORD: z.string().optional(),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
 });
@@ -47,9 +66,12 @@ try {
 
 export const config = Object.freeze({
   ...parsed.data,
+  REDIS_QUEUE_URL: parsed.data.REDIS_QUEUE_URL ?? parsed.data.REDIS_URL,
   previousJwtKeys,
   cookieSecure: parsed.data.COOKIE_SECURE === undefined
     ? parsed.data.NODE_ENV === 'production'
     : parsed.data.COOKIE_SECURE === 'true',
   smtpSecure: parsed.data.SMTP_SECURE === 'true',
+  autoConfirmInvoices: parsed.data.AUTO_CONFIRM_INVOICES === 'true',
+  autoSendInvoices: parsed.data.AUTO_SEND_INVOICES === 'true',
 });
