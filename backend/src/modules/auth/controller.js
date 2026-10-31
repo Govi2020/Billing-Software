@@ -6,11 +6,6 @@ export async function signup(req, res) {
   res.status(201).json({ data: user });
 }
 
-export async function verifyEmail(req, res) {
-  const result = await auth.verifyEmail(req.validated.query.token);
-  res.json({ data: result });
-}
-
 export async function login(req, res) {
   const result = await auth.login(req.validated.body, req, res);
   res.json({ data: result });

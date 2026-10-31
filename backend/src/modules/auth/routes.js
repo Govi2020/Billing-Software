@@ -9,7 +9,7 @@ import { validate } from '../../middleware/validate.js';
 import * as controller from './controller.js';
 import {
   changePasswordSchema, createStaffSchema, emailSchema, listUsersSchema, loginSchema,
-  patchUserSchema, resetSchema, signupSchema, userIdSchema, verifyEmailQuerySchema,
+  patchUserSchema, resetSchema, signupSchema, userIdSchema,
 } from './schemas.js';
 
 const router = Router();
@@ -64,14 +64,9 @@ function requireCsrf(req, _res, next) {
   next();
 }
 
-// Spec §11.1; customer sign-up/verification screens in §13.1 and profile in §14.1.
+// Customer sign-up and profile routes.
 router.post('/signup', signupLimit, validate({ body: signupSchema }), async (req, res) => {
   await controller.signup(req, res);
-});
-
-// Spec §6.1 email-verification flow; emailed link in the customer journey §13.1.
-router.get('/verify-email', validate({ query: verifyEmailQuerySchema }), async (req, res) => {
-  await controller.verifyEmail(req, res);
 });
 
 // Spec §11.1; login screen and role-specific entry points in §13–14.

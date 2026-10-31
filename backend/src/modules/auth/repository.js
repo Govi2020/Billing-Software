@@ -9,10 +9,15 @@ export async function findUserByEmail(db, normalizedEmail) {
 }
 
 export async function enqueueEmail(db, { to, template, payload, dedupeKey }) {
-  await db.query(
+  const { rows } = await db.query(
     `INSERT INTO email_outbox (to_email, template, payload, dedupe_key)
      VALUES ($1, $2, $3::jsonb, $4)
-     ON CONFLICT (dedupe_key) DO NOTHING`,
+     ON CONFLICT (dedupe_key) DO UPDATE
+       SET status = CASE WHEN email_outbox.status = 'failed' THEN 'pending' ELSE email_outbox.status END,
+           attempts = CASE WHEN email_outbox.status = 'failed' THEN 0 ELSE email_outbox.attempts END,
+           last_error = CASE WHEN email_outbox.status = 'failed' THEN NULL ELSE email_outbox.last_error END
+     RETURNING id, status`,
     [to, template, JSON.stringify(payload), dedupeKey],
   );
+  return rows[0];
 }

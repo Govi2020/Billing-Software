@@ -58,7 +58,7 @@ function Login({ onLogin, onSignup, onForgotPassword, initialError }) {
       {mode !== 'forgot' && <label>Password<input autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} type="password" value={password} onChange={e => setPassword(e.target.value)} required minLength={mode === 'signup' ? 9 : undefined} maxLength={128} /></label>}
       {mode === 'signup' && <p className="auth-hint">Use at least 9 characters with uppercase, lowercase, and a symbol.</p>}
       {error && <p className="form-error" role="alert">{error}</p>}
-      {signupComplete && <p className="signup-success" role="status">Account created. Check your email for a verification link before signing in.</p>}
+      {signupComplete && <p className="signup-success" role="status">Account created. You can now sign in with your email and password.</p>}
       {resetRequested && <p className="signup-success" role="status">If an account exists for this address, a reset link will be sent.</p>}
       {!signupComplete && !resetRequested && <button className="button primary full" type="submit" disabled={submitting}>{submitting ? (mode === 'signup' ? 'Creating account…' : mode === 'forgot' ? 'Sending…' : 'Signing in…') : (mode === 'signup' ? 'Create account' : mode === 'forgot' ? 'Send reset link' : 'Sign in')} <span>→</span></button>}
       {mode === 'login' && <button className="text-button auth-forgot" type="button" onClick={() => { setMode('forgot'); setError(''); }}>Forgot password?</button>}
@@ -67,42 +67,6 @@ function Login({ onLogin, onSignup, onForgotPassword, initialError }) {
         {' '}<button type="button" onClick={() => { setMode(mode === 'signup' || mode === 'forgot' ? 'login' : 'signup'); setError(''); setSignupComplete(false); setResetRequested(false); }}>{mode === 'signup' || mode === 'forgot' || signupComplete ? 'Sign in' : 'Create an account'}</button>
       </p>
     </form></section>
-  </main>;
-}
-
-function EmailVerification() {
-  const [status, setStatus] = useState('verifying');
-  const [message, setMessage] = useState('');
-  useEffect(() => {
-    let active = true;
-    const token = new URLSearchParams(window.location.search).get('token');
-    if (!token) {
-      setStatus('error');
-      setMessage('This verification link is missing its token. Request a new signup email or contact support.');
-      return () => { active = false; };
-    }
-    api.verifyEmail(token)
-      .then(() => {
-        if (active) {
-          setStatus('verified');
-          window.history.replaceState(null, '', '/verify-email');
-        }
-      })
-      .catch(error => {
-        if (active) {
-          setStatus('error');
-          setMessage(error.message);
-        }
-      });
-    return () => { active = false; };
-  }, []);
-  return <main className="verification-page">
-    <section className="verification-card">
-      <a className="brand" href="/"><span className="brand-mark">b</span> brightloop</a>
-      {status === 'verifying' && <><span className="eyebrow">EMAIL VERIFICATION</span><h1>Verifying your email…</h1><p className="muted">Please keep this page open for a moment.</p></>}
-      {status === 'verified' && <><span className="verification-mark">✓</span><span className="eyebrow">EMAIL VERIFIED</span><h1>Your account is ready.</h1><p className="muted">Your email address has been verified. You can now sign in to Brightloop.</p><a className="button primary verification-action" href="/">Continue to sign in <span>→</span></a></>}
-      {status === 'error' && <><span className="eyebrow">VERIFICATION LINK UNAVAILABLE</span><h1>We couldn’t verify your email.</h1><p className="form-error" role="alert">{message}</p><p className="muted">Verification links can only be used once and expire after 24 hours.</p><a className="button secondary verification-action" href="/">Return to sign in</a></>}
-    </section>
   </main>;
 }
 
@@ -135,7 +99,6 @@ function exportPage(page, datasets) {
 }
 
 function App() {
-  if (window.location.pathname === '/verify-email') return <EmailVerification />;
   if (window.location.pathname === '/reset') return <PasswordReset />;
   return <WorkspaceApp />;
 }
@@ -253,7 +216,17 @@ function WorkspaceApp() {
   const [page, setPage] = useState(null);
   const [search, setSearch] = useState('');
   const [createMode, setCreateMode] = useState(null);
+  const [theme, setTheme] = useState(() => {
+    const savedTheme = window.localStorage.getItem('brightloop-theme');
+    return ['light', 'dark', 'midnight', 'dark-ocean', 'dark-violet', 'dark-amber', 'ocean', 'sunset'].includes(savedTheme) ? savedTheme : 'light';
+  });
   const searchRef = useRef(null);
+  useEffect(() => {
+    const root = document.documentElement;
+    root.dataset.theme = theme.startsWith('dark-') || theme === 'midnight' ? 'dark' : theme;
+    root.dataset.darkTheme = theme === 'dark' ? 'classic' : theme;
+    window.localStorage.setItem('brightloop-theme', theme);
+  }, [theme]);
   useEffect(() => {
     const handleShortcut = event => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
@@ -425,6 +398,12 @@ function WorkspaceApp() {
     setWorkspaceAttempt(attempt => attempt + 1);
     return result;
   };
+  const demoPayment = async invoiceId => {
+    return api.demoPayment(token, invoiceId);
+  };
+  const refreshWorkspace = () => {
+    setWorkspaceAttempt(attempt => attempt + 1);
+  };
   const updateCustomerProfile = async profile => {
     const result = await api.updateCustomerProfile(token, profile);
     setUser(current => ({ ...current, name: result.name, full_name: result.name }));
@@ -451,6 +430,11 @@ function WorkspaceApp() {
   };
   const reactivateUser = async (userId, updatedAt) => {
     const result = await api.reactivateUser(token, userId, updatedAt);
+    setWorkspaceAttempt(attempt => attempt + 1);
+    return result;
+  };
+  const permanentlyDeleteCustomer = async (customerId, confirmation) => {
+    const result = await api.hardDeleteCustomer(token, customerId, confirmation);
     setWorkspaceAttempt(attempt => attempt + 1);
     return result;
   };
@@ -516,15 +500,15 @@ function WorkspaceApp() {
       <div className="sidebar-bottom"><div className="help-card"><span className="help-icon">?</span><b>Need a hand?</b><small>Use the support email configured by your workspace.</small></div><button className="profile-row" onClick={() => setPage('Profile')}><span className="user-avatar">{user.name.split(' ').map(x => x[0]).join('')}</span><span><b>{user.name}</b><small>{role[0].toUpperCase() + role.slice(1)}</small></span><span className="more">···</span></button></div>
     </aside>
     <main className="main-area">
-      <header className="topbar"><div className="breadcrumb">Brightloop <span>/</span> {activePage}</div><div className="top-actions"><label className="searchbox"><span>⌕</span><input ref={searchRef} aria-label="Search" placeholder="Search customers, SUB-, INV-…" value={search} onChange={e => setSearch(e.target.value)} /><kbd>⌘ K</kbd>{search && <button className="search-clear" type="button" aria-label="Clear search" title="Clear search" onClick={() => setSearch('')}>×</button>}</label><span className="icon-button notification" aria-label="Notifications" title="Notifications are shown in Needs attention">♧</span><button className="user-menu" onClick={logout} title="Sign out"><span className="user-avatar">{user.name.split(' ').map(x => x[0]).join('')}</span><span className="logout-label">Sign out</span>⌄</button></div></header>
+      <header className="topbar"><div className="breadcrumb">Brightloop <span>/</span> {activePage}</div><div className="top-actions"><label className="searchbox"><span>⌕</span><input ref={searchRef} aria-label="Search" placeholder="Search customers, SUB-, INV-…" value={search} onChange={e => setSearch(e.target.value)} /><kbd>⌘ K</kbd>{search && <button className="search-clear" type="button" aria-label="Clear search" title="Clear search" onClick={() => setSearch('')}>×</button>}</label><label className="theme-picker"><span>Theme</span><select aria-label="Choose appearance theme" value={theme} onChange={event => setTheme(event.target.value)}><option value="light">Light</option><option value="dark">Dark · classic</option><option value="midnight">Dark · midnight</option><option value="dark-ocean">Dark · ocean</option><option value="dark-violet">Dark · violet</option><option value="dark-amber">Dark · amber</option><option value="ocean">Ocean</option><option value="sunset">Sunset</option></select></label><span className="icon-button notification" aria-label="Notifications" title="Notifications are shown in Needs attention">♧</span><button className="user-menu" onClick={logout} title="Sign out"><span className="user-avatar">{user.name.split(' ').map(x => x[0]).join('')}</span><span className="logout-label">Sign out</span>⌄</button></div></header>
       {workspaceError && <p className="workspace-error" role="alert">Workspace data could not be refreshed: {workspaceError}</p>}
       <div className="content">
         <div className="page-heading"><div><div className="eyebrow">{isCustomer ? 'CUSTOMER PORTAL' : isAdmin ? 'ADMINISTRATION' : 'OPERATIONS'}</div><h1>{heading}</h1><p>{isCustomer ? 'Your subscriptions, invoices and account details.' : activePage === 'Dashboard' ? (isAdmin ? 'A clear view of what is happening across your business.' : 'Here is what needs your attention today.') : `Manage and review ${activePage.toLowerCase()} across your workspace.`}</p></div>{!isCustomer && <div className="heading-actions">{['Customers', 'Subscriptions', 'Invoices', 'Payments', 'Products & plans', 'Catalog', 'Discounts', 'Staff', 'Finance'].includes(activePage) && <button className="button secondary" onClick={() => exportPage(activePage, { customers: filteredCustomers, subscriptions: filteredSubs, invoices: filteredInvoices, payments: workspace.payments, catalog: [...workspace.products.map(item => ({ type: 'Product', ...item })), ...workspace.plans.map(item => ({ type: 'Plan', ...item })), ...workspace.taxes.map(item => ({ type: 'Tax', ...item }))], staff: workspace.staff, discounts: workspace.discounts })}>Export <span>↓</span></button>}{['Customers', 'Subscriptions'].includes(activePage) && <button className="button primary" onClick={() => setCreateMode(createMode ? null : activePage === 'Customers' ? 'customer' : 'quotation')}>＋ {activePage === 'Customers' ? 'Add customer' : 'New quotation'}</button>}</div>}</div>
-        {activePage === 'Dashboard' || activePage === 'Overview' ? <Dashboard user={user} isAdmin={isAdmin} isCustomer={isCustomer} onNavigate={setPage} onConfirm={confirmQuotation} onManage={manageSubscription} rows={filteredSubs} bills={filteredInvoices} summary={summary} monthlyRevenue={workspace.monthlyRevenue} latestBillingRun={workspace.latestBillingRun} missingInvoices={workspace.missingInvoices} /> :
+        {activePage === 'Dashboard' || activePage === 'Overview' ? <Dashboard user={user} isAdmin={isAdmin} isCustomer={isCustomer} onNavigate={setPage} onConfirm={confirmQuotation} onManage={manageSubscription} onDemoPay={demoPayment} onPaymentComplete={refreshWorkspace} rows={filteredSubs} bills={filteredInvoices} summary={summary} monthlyRevenue={workspace.monthlyRevenue} latestBillingRun={workspace.latestBillingRun} missingInvoices={workspace.missingInvoices} paymentInstructions={workspace.paymentInstructions} /> :
         activePage === 'Marketplace' ? <Marketplace plans={workspace.plans} onSubscribe={subscribe} onNavigate={setPage} /> :
-        activePage === 'Customers' ? <>{createMode === 'customer' && <CustomerForm onSave={createCustomer} onCancel={() => setCreateMode(null)} />}<CustomerTable data={filteredCustomers} isAdmin={isAdmin} onDeactivate={deactivateUser} onReactivate={reactivateUser} /></> :
+        activePage === 'Customers' ? <>{createMode === 'customer' && <CustomerForm onSave={createCustomer} onCancel={() => setCreateMode(null)} />}<CustomerTable data={filteredCustomers} isAdmin={isAdmin} onDeactivate={deactivateUser} onReactivate={reactivateUser} onDelete={permanentlyDeleteCustomer} /></> :
         activePage === 'Subscriptions' ? <>{createMode === 'quotation' && <QuotationForm customers={customers} plans={workspace.plans} templates={workspace.quotationTemplates || []} onSave={createQuotation} onCancel={() => setCreateMode(null)} />}<SubscriptionTable data={filteredSubs} products={workspace.products || []} onDetails={getSubscriptionDetails} onUpdateLines={isCustomer ? null : updateSubscriptionLines} onConfirm={isCustomer ? null : confirmQuotation} onAccept={isCustomer ? acceptQuotation : null} onRenew={renewSubscription} onManage={manageSubscription} isCustomer={isCustomer} /></> :
-        activePage === 'Invoices' ? <InvoiceWorkspace data={filteredInvoices} isCustomer={isCustomer} onRecordPayment={isCustomer ? null : recordPayment} onConfirmInvoice={isCustomer ? null : confirmInvoice} onCancelInvoice={isCustomer ? null : cancelInvoice} onSendInvoice={isCustomer ? null : sendInvoice} onRemindInvoice={isCustomer ? null : remindInvoice} token={token} /> :
+        activePage === 'Invoices' ? <InvoiceWorkspace data={filteredInvoices} isCustomer={isCustomer} paymentInstructions={workspace.paymentInstructions} onDemoPay={isCustomer ? demoPayment : null} onPaymentComplete={refreshWorkspace} onRecordPayment={isCustomer ? null : recordPayment} onConfirmInvoice={isCustomer ? null : confirmInvoice} onCancelInvoice={isCustomer ? null : cancelInvoice} onSendInvoice={isCustomer ? null : sendInvoice} onRemindInvoice={isCustomer ? null : remindInvoice} token={token} /> :
         activePage === 'Payments' ? <Payments data={workspace.payments} isCustomer={isCustomer} invoices={invoices} /> :
         activePage === 'Products & plans' || activePage === 'Catalog' ? <Catalog isAdmin={isAdmin} products={workspace.products} plans={workspace.plans} taxes={workspace.taxes} onCreatePlan={createPlan} onUpdatePlan={updatePlan} onCreateProduct={createProduct} onUpdateProduct={updateProduct} onCreateVariant={createProductVariant} onUpdateVariant={updateProductVariant} onCreateTax={createTax} onUpdateTax={updateTax} onDeactivate={deactivateRecord} /> :
         activePage === 'Finance' ? <Finance isAdmin={isAdmin} summary={summary} invoices={invoices} /> :
@@ -543,7 +527,7 @@ function WorkspaceApp() {
   </div>;
 }
 
-function Dashboard({ isAdmin, isCustomer, onNavigate, onConfirm, onManage, rows, bills, summary, monthlyRevenue = [], latestBillingRun, missingInvoices = [] }) {
+function Dashboard({ isAdmin, isCustomer, onNavigate, onConfirm, onManage, onDemoPay, onPaymentComplete, rows, bills, summary, monthlyRevenue = [], latestBillingRun, missingInvoices = [], paymentInstructions }) {
   const overdue = bills.filter(invoice => invoice.is_overdue);
   const attentionSubscriptions = rows.filter(subscription => ['Draft', 'Quotation'].includes(subscription.status));
   const attentionItems = [
@@ -566,20 +550,52 @@ function Dashboard({ isAdmin, isCustomer, onNavigate, onConfirm, onManage, rows,
   const nextSubscription = rows.find(subscription => subscription.status === 'Active');
   const nextInvoice = bills
     .filter(invoice => invoice.status === 'Confirmed' && !invoice.is_overdue)
-    .sort((left, right) => left.due.localeCompare(right.due))[0];
+    .sort((left, right) => String(left.record_due_date || left.due).localeCompare(String(right.record_due_date || right.due)))[0];
   if (isCustomer) {
+    const activeSubscriptions = rows.filter(subscription => subscription.status === 'Active');
+    const unpaidInvoices = bills.filter(invoice =>
+      invoice.status === 'Confirmed' && Number(invoice.amount_due || 0) > 0);
+    const customerOverdue = unpaidInvoices
+      .filter(invoice => invoice.is_overdue)
+      .sort((left, right) => Number(right.days_overdue || 0) - Number(left.days_overdue || 0));
+    const upcomingPayments = unpaidInvoices
+      .filter(invoice => !invoice.is_overdue)
+      .sort((left, right) => String(left.record_due_date || '').localeCompare(String(right.record_due_date || '')));
     return <>
+      <section className="customer-home-section">
+        <div className="customer-section-heading"><div><span className="eyebrow">YOUR SERVICES</span><h2>Active subscriptions</h2><p>Your current plans and upcoming billing.</p></div><button className="text-button" onClick={() => onNavigate('Subscriptions')}>All subscriptions →</button></div>
+        {activeSubscriptions.length
+          ? <div className="customer-subscription-grid">{activeSubscriptions.map(subscription => <article className="panel customer-subscription-card" key={subscription.id}>
+            <div className="customer-subscription-top"><span className="customer-plan-mark">↻</span><Badge>Active</Badge></div>
+            <h3>{subscription.plan}</h3>
+            <p>{subscription.id}</p>
+            <div className="customer-subscription-meta"><span>Next invoice</span><b>{subscription.date || 'Not scheduled'}</b></div>
+            <div className="customer-subscription-meta"><span>Plan amount</span><b>{money(subscription.amount)}</b></div>
+          </article>)}</div>
+          : <div className="panel customer-empty-state"><h3>No active subscriptions yet</h3><p>Explore the marketplace to find a plan that works for you.</p><button className="button primary" onClick={() => onNavigate('Marketplace')}>Explore marketplace</button></div>}
+      </section>
+      {customerOverdue.length > 0 && <section className="customer-payment-alert overdue-alert" role="alert">
+        <span className="customer-alert-icon">!</span>
+        <div><h2>{customerOverdue.length === 1 ? 'An invoice is past due' : `${customerOverdue.length} invoices are past due`}</h2><p>{money(customerOverdue.reduce((sum, invoice) => sum + Number(invoice.amount_due || 0), 0))} outstanding. Please review these invoices and contact billing if you need help.</p></div>
+        <button className="button danger" onClick={() => onNavigate('Invoices')}>Review overdue invoices</button>
+      </section>}
+      {upcomingPayments.length > 0 && <section className="customer-payment-alert pending-alert">
+        <span className="customer-alert-icon">◷</span>
+        <div><h2>You have {upcomingPayments.length} unpaid {upcomingPayments.length === 1 ? 'invoice' : 'invoices'}</h2><p>{money(upcomingPayments.reduce((sum, invoice) => sum + Number(invoice.amount_due || 0), 0))} outstanding. Check the due dates below to avoid late payment.</p></div>
+        <button className="button secondary" onClick={() => onNavigate('Invoices')}>View invoices</button>
+      </section>}
+      <div className="section-grid customer-invoice-grid">
+        <CustomerInvoiceList title="Past-due invoices" invoices={customerOverdue} overdue onNavigate={onNavigate} paymentInstructions={paymentInstructions} onDemoPay={onDemoPay} onPaymentComplete={onPaymentComplete} />
+        <CustomerInvoiceList title="Upcoming payments" invoices={upcomingPayments} onNavigate={onNavigate} paymentInstructions={paymentInstructions} onDemoPay={onDemoPay} onPaymentComplete={onPaymentComplete} />
+      </div>
       <div className="metric-grid four">
-        <Metric label="Active subscriptions" value={summary.active_subscriptions || 0} foot="Across your account" icon="↻" />
+        <Metric label="Active subscriptions" value={activeSubscriptions.length} foot="Across your account" icon="↻" />
         <Metric label="Next payment" value={money(nextInvoice?.amount_due || 0)} foot={nextInvoice?.due || nextSubscription?.date || 'No upcoming invoice'} icon="↗" />
-        <Metric label="Pending payments" value={money(summary.outstanding_amount || 0)} foot={`${bills.filter(invoice => invoice.status === 'Confirmed').length} invoices awaiting payment`} icon="▤" />
-        <Metric label="Overdue" value={money(summary.overdue_amount || 0)} foot={summary.overdue_invoices ? `${summary.overdue_invoices} invoices past due` : 'You are all caught up'} icon="✓" positive={!summary.overdue_invoices} warning={Boolean(summary.overdue_invoices)} />
+        <Metric label="Pending payments" value={money(summary.outstanding_amount || 0)} foot={`${unpaidInvoices.length} invoices awaiting payment`} icon="▤" warning={unpaidInvoices.length > 0} />
+        <Metric label="Overdue" value={money(summary.overdue_amount || 0)} foot={customerOverdue.length ? `${customerOverdue.length} invoices past due` : 'You are all caught up'} icon="!" positive={!customerOverdue.length} warning={customerOverdue.length > 0} />
       </div>
-      <div className="section-grid">
-        <section className="panel"><PanelTitle title="Your subscriptions" action="View all" onClick={() => onNavigate('Subscriptions')} /><SubscriptionTable compact data={rows} /></section>
-        <section className="panel"><PanelTitle title="Recent invoices" action="View all" onClick={() => onNavigate('Invoices')} /><InvoiceTable compact data={bills} isCustomer /></section>
-      </div>
-      <div className="callout"><span className="callout-icon">i</span><span><b>Everything in one place.</b> Your plan changes and invoices are available anytime from the left menu.</span><button onClick={() => onNavigate('Profile')}>Review profile →</button></div>
+      <div className="callout"><span className="callout-icon">i</span><span><b>Need help with a payment?</b> Your invoice and payment history is always available in your account.</span><button onClick={() => onNavigate('Profile')}>Review profile →</button></div>
+      {unpaidInvoices.length === 0 && activeSubscriptions.length > 0 && <p className="customer-all-paid" role="status">You’re all caught up—there are no unpaid invoices.</p>}
     </>;
   }
   return <>
@@ -625,6 +641,57 @@ function Dashboard({ isAdmin, isCustomer, onNavigate, onConfirm, onManage, rows,
       <button className="text-button" onClick={() => onNavigate('Statistics')}>Explain →</button>
     </div>}
   </>;
+}
+function CustomerInvoiceList({ title, invoices, overdue = false, onNavigate, paymentInstructions, onDemoPay, onPaymentComplete }) {
+  return <section className={`panel customer-invoice-list ${overdue ? 'has-overdue' : ''}`}>
+    <PanelTitle title={title} badge={invoices.length ? `${invoices.length}` : null} action="All invoices" onClick={() => onNavigate('Invoices')} />
+    {invoices.length
+      ? <div className="customer-invoice-items">{invoices.map(invoice => <article className="customer-invoice-item" key={invoice.record_id || invoice.id}>
+        <div className="customer-invoice-main"><b>{invoice.id}</b><span>{invoice.plan || 'Subscription invoice'}</span><small>{overdue ? (Number(invoice.days_overdue) === 1 ? '1 day overdue' : `${invoice.days_overdue || 'Past'} days overdue`) : `Due ${invoice.due}`}</small></div>
+        <div className="customer-invoice-balance"><b>{money(invoice.amount_due)}</b><span>{overdue ? 'Past due' : 'Balance due'}</span>{paymentInstructions?.upiId
+          ? <a className="button primary small customer-pay-link" href={upiPaymentLink(paymentInstructions, invoice)} aria-label={`Pay invoice ${invoice.id} using UPI`}>Pay invoice</a>
+          : <button className="button primary small customer-pay-link" onClick={() => onNavigate('Invoices')} aria-label={`View payment options for invoice ${invoice.id}`}>Pay invoice</button>}
+          {paymentInstructions?.demoPaymentsEnabled && <DemoPaymentButton invoice={invoice} onPay={onDemoPay} onPaymentComplete={onPaymentComplete} />}</div>
+      </article>)}</div>
+      : <p className="customer-invoice-empty">{overdue ? 'No past-due invoices. You’re up to date.' : 'No upcoming invoice payments.'}</p>}
+  </section>;
+}
+function DemoPaymentButton({ invoice, onPay, onPaymentComplete }) {
+  const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [payment, setPayment] = useState(null);
+  const [error, setError] = useState('');
+  const completePayment = async () => {
+    setSaving(true);
+    setError('');
+    try {
+      setPayment(await onPay(invoice.record_id));
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+  return <>
+    <button className="button secondary small customer-pay-link" onClick={() => { setOpen(true); setPayment(null); setError(''); }}>Trial pay</button>
+    {open && <div className="demo-payment-backdrop" role="presentation" onClick={() => { if (!saving) setOpen(false); }}>
+      <section className="panel demo-payment-dialog" role="dialog" aria-modal="true" aria-labelledby="demo-payment-title" onClick={event => event.stopPropagation()}>
+        {payment
+          ? <><div className="demo-payment-success-mark" aria-hidden="true">✓</div><h2 id="demo-payment-title">Payment paid</h2><p>{money(payment.amount)} was recorded against invoice {invoice.id}. This was a simulated demo payment; no money was transferred.</p><p className="demo-receipt-status">{payment.receipt_status === 'sent' ? 'Your payment receipt email was sent.' : payment.receipt_status === 'failed' ? 'Payment was recorded, but the receipt email could not be delivered. Check email configuration.' : 'Your payment receipt email is queued for delivery.'}</p><button className="button primary full" onClick={() => { setOpen(false); onPaymentComplete(); }}>Done</button></>
+          : <><span className="eyebrow">DEMO CHECKOUT</span><h2 id="demo-payment-title">Pay invoice {invoice.id}?</h2><p>This trial payment will mark the invoice paid for demonstration purposes. No payment provider or real funds are involved.</p><div className="demo-payment-amount">{money(invoice.amount_due)}</div>{error && <p className="form-error" role="alert">{error}</p>}<div className="demo-payment-actions"><button className="button primary" disabled={saving} onClick={completePayment}>{saving ? 'Processing…' : 'Confirm demo payment'}</button><button className="button secondary" disabled={saving} onClick={() => setOpen(false)}>Cancel</button></div></>}
+      </section>
+    </div>}
+  </>;
+}
+function upiPaymentLink(instructions, invoice) {
+  const params = new URLSearchParams({
+    pa: instructions.upiId,
+    pn: instructions.payeeName || 'Brightloop Software',
+    am: Number(invoice.amount_due || 0).toFixed(2),
+    tn: `Invoice ${invoice.id}`,
+    cu: 'INR',
+  });
+  return `upi://pay?${params.toString()}`;
 }
 function Metric({ label, value, foot, icon, warning, positive, trend }) { return <section className="metric-card"><div className={`metric-icon ${warning ? 'warn' : positive ? 'good' : ''}`}>{icon}</div><div className="metric-label">{label}</div><div className="metric-value">{value}</div><div className={`metric-foot ${warning ? 'red-text' : trend ? 'green-text' : ''}`}>{trend && <span>↗ </span>}{foot}</div></section>; }
 function PanelTitle({ title, action, onClick, badge }) { return <div className="panel-title"><h2>{title}</h2>{badge && <span className="count-badge">{badge}</span>}{action && (onClick ? <button className="text-button" onClick={onClick}>{action} <span>→</span></button> : <span className="panel-meta">{action}</span>)}</div>; }
@@ -741,7 +808,7 @@ async function printInvoice(token, invoiceId) {
     throw error;
   }
 }
-function InvoiceWorkspace({ data, ...tableProps }) {
+function InvoiceWorkspace({ data, isCustomer, paymentInstructions, ...tableProps }) {
   const [filter, setFilter] = useState('All invoices');
   const filters = ['All invoices', 'Needs payment', 'Overdue', 'Paid', 'Draft', 'Cancelled'];
   const overdue = data.filter(invoice => invoice.is_overdue);
@@ -756,6 +823,7 @@ function InvoiceWorkspace({ data, ...tableProps }) {
     return true;
   });
   return <>
+    {isCustomer && <PaymentInstructions instructions={paymentInstructions} />}
     <div className="metric-grid four invoice-summary">
       <Metric label="Invoices" value={data.length} foot="All invoices in this view" icon="▤" />
       <Metric label="Awaiting payment" value={money(open.reduce((sum, invoice) => sum + Number(invoice.amount_due || 0), 0))} foot={`${open.length} unpaid or partly paid`} icon="◷" warning={open.length > 0} />
@@ -767,12 +835,12 @@ function InvoiceWorkspace({ data, ...tableProps }) {
         <div><b>Invoices</b><span>{filtered.length} shown · balances update as payments are recorded</span></div>
         <label className="filter-select">Show<select value={filter} onChange={event => setFilter(event.target.value)}>{filters.map(value => <option key={value}>{value}</option>)}</select></label>
       </div>
-      <InvoiceTable data={filtered} {...tableProps} />
+      <InvoiceTable data={filtered} isCustomer={isCustomer} paymentInstructions={paymentInstructions} {...tableProps} />
     </section>
   </>;
 }
 
-function InvoiceTable({ data, compact, isCustomer, onRecordPayment, onConfirmInvoice, onCancelInvoice, onSendInvoice, onRemindInvoice, token }) {
+function InvoiceTable({ data, compact, isCustomer, paymentInstructions, onDemoPay, onPaymentComplete, onRecordPayment, onConfirmInvoice, onCancelInvoice, onSendInvoice, onRemindInvoice, token }) {
   const [paying, setPaying] = useState(null);
   const [amount, setAmount] = useState('');
   const [method, setMethod] = useState('upi');
@@ -837,8 +905,17 @@ function InvoiceTable({ data, compact, isCustomer, onRecordPayment, onConfirmInv
     const callback = action === 'confirm' ? onConfirmInvoice : action === 'send' ? onSendInvoice : onRemindInvoice;
     setWorking(`${invoice.id}:${action}`);
     try {
-      await callback(invoice.record_id);
-      setMessage(action === 'confirm' ? `${invoice.id} confirmed.` : `${action === 'send' ? 'Invoice' : 'Reminder'} for ${invoice.id} queued for email.`);
+      const result = await callback(invoice.record_id);
+      if (action === 'confirm') {
+        setMessage(`${invoice.id} confirmed.`);
+      } else {
+        const message = result.delivery_status === 'sent'
+          ? `Email ${action === 'send' ? 'invoice' : 'reminder'} sent to ${result.sent_to}.`
+          : result.delivery_status === 'failed'
+            ? `Email delivery failed for ${result.sent_to}. Check the email configuration and try again later.`
+            : `Email ${action === 'send' ? 'invoice' : 'reminder'} queued for delivery to ${result.sent_to}.`;
+        setMessage(message);
+      }
     } catch (requestError) {
       setError(requestError.message);
     } finally {
@@ -849,7 +926,7 @@ function InvoiceTable({ data, compact, isCustomer, onRecordPayment, onConfirmInv
   return <>
     {error && <p className="form-error" role="alert">{error}</p>}
     {message && <p className="signup-success" role="status">{message}</p>}
-    <div className="table-wrap"><table><thead><tr><th>INVOICE</th>{!compact && !isCustomer && <th>CUSTOMER</th>}<th>ISSUED</th>{!compact && <th>DUE DATE</th>}<th>TOTAL</th>{!compact && <><th>PAID</th><th>BALANCE DUE</th></>}<th>STATUS</th>{showActions && <th>ACTION</th>}</tr></thead><tbody>{data.length ? data.map(i => <tr key={i.id}><td><span className="record-link">{i.id}</span></td>{!compact && !isCustomer && <td>{i.customer}</td>}<td>{i.date}</td>{!compact && <td>{i.due}</td>}<td>{money(i.amount)}</td>{!compact && <><td>{money(i.amount_paid)}</td><td className={Number(i.amount_due) > 0 ? 'amount-due' : ''}>{money(i.amount_due)}</td></>}<td><Badge>{i.is_overdue ? 'Overdue' : i.status}</Badge></td>{showActions && <td className="row-actions">{token && <button className="button secondary small" disabled={working !== null} onClick={() => performAction(i, 'print')}>{working === `${i.id}:print` ? 'Preparing…' : 'Print / PDF'}</button>}{i.status === 'Draft' && onConfirmInvoice && <button className="button primary small" disabled={working !== null} onClick={() => performAction(i, 'confirm')}>{working === `${i.id}:confirm` ? 'Confirming…' : 'Confirm'}</button>}{i.status === 'Confirmed' && onRecordPayment && <button className="button secondary small" onClick={() => openPayment(i)}>Record payment</button>}{i.status === 'Confirmed' && onSendInvoice && <button className="button secondary small" disabled={working !== null} onClick={() => performAction(i, 'send')}>Send</button>}{i.status === 'Confirmed' && onRemindInvoice && <button className="button secondary small" disabled={working !== null} onClick={() => performAction(i, 'remind')}>Reminder</button>}{['Draft', 'Confirmed'].includes(i.status) && Number(i.amount_paid || 0) === 0 && onCancelInvoice && <button className="button danger small" disabled={working !== null} onClick={() => performAction(i, 'cancel')}>{working === `${i.id}:cancel` ? 'Cancelling…' : 'Cancel'}</button>}</td>}</tr>) : <tr><td colSpan={compact ? (isCustomer ? 4 : 5) : (isCustomer ? (showActions ? 8 : 7) : showActions ? 9 : 8)} className="table-empty">No invoices match this filter.</td></tr>}</tbody></table></div>
+    <div className="table-wrap"><table><thead><tr><th>INVOICE</th>{!compact && !isCustomer && <th>CUSTOMER</th>}<th>ISSUED</th>{!compact && <th>DUE DATE</th>}<th>TOTAL</th>{!compact && <><th>PAID</th><th>BALANCE DUE</th></>}<th>STATUS</th>{showActions && <th>ACTION</th>}</tr></thead><tbody>{data.length ? data.map(i => <tr key={i.id}><td><span className="record-link">{i.id}</span></td>{!compact && !isCustomer && <td>{i.customer}</td>}<td>{i.date}</td>{!compact && <td>{i.due}</td>}<td>{money(i.amount)}</td>{!compact && <><td>{money(i.amount_paid)}</td><td className={Number(i.amount_due) > 0 ? 'amount-due' : ''}>{money(i.amount_due)}</td></>}<td><Badge>{i.is_overdue ? 'Overdue' : i.status}</Badge></td>{showActions && <td className="row-actions">{isCustomer && paymentInstructions?.upiId && i.status === 'Confirmed' && Number(i.amount_due) > 0 && <a className="button primary small" href={upiPaymentLink(paymentInstructions, i)}>Pay with UPI</a>}{isCustomer && paymentInstructions?.demoPaymentsEnabled && i.status === 'Confirmed' && Number(i.amount_due) > 0 && <DemoPaymentButton invoice={i} onPay={onDemoPay} onPaymentComplete={onPaymentComplete} />}{token && <button className="button secondary small" disabled={working !== null} onClick={() => performAction(i, 'print')}>{working === `${i.id}:print` ? 'Preparing…' : 'Print / PDF'}</button>}{i.status === 'Draft' && onConfirmInvoice && <button className="button primary small" disabled={working !== null} onClick={() => performAction(i, 'confirm')}>{working === `${i.id}:confirm` ? 'Confirming…' : 'Confirm'}</button>}{i.status === 'Confirmed' && onRecordPayment && <button className="button secondary small" onClick={() => openPayment(i)}>Record payment</button>}{i.status === 'Confirmed' && onSendInvoice && <button className="button secondary small" disabled={working !== null} onClick={() => performAction(i, 'send')}>{working === `${i.id}:send` ? 'Sending…' : 'Send'}</button>}{i.status === 'Confirmed' && onRemindInvoice && <button className="button secondary small" disabled={working !== null} onClick={() => performAction(i, 'remind')}>{working === `${i.id}:remind` ? 'Sending…' : 'Email reminder'}</button>}{['Draft', 'Confirmed'].includes(i.status) && Number(i.amount_paid || 0) === 0 && onCancelInvoice && <button className="button danger small" disabled={working !== null} onClick={() => performAction(i, 'cancel')}>{working === `${i.id}:cancel` ? 'Cancelling…' : 'Cancel'}</button>}</td>}</tr>) : <tr><td colSpan={compact ? (isCustomer ? 4 : 5) : (isCustomer ? (showActions ? 8 : 7) : showActions ? 9 : 8)} className="table-empty">No invoices match this filter.</td></tr>}</tbody></table></div>
     {paying && <form className="panel plan-form" onSubmit={submitPayment}>
       <h2>Record payment for {paying.id}</h2>
       <div className="plan-form-grid">
@@ -862,13 +939,15 @@ function InvoiceTable({ data, compact, isCustomer, onRecordPayment, onConfirmInv
     </form>}
   </>;
 }
-function CustomerTable({ data, isAdmin, onDeactivate, onReactivate }) {
+function CustomerTable({ data, isAdmin, onDeactivate, onReactivate, onDelete }) {
   const [working, setWorking] = useState(null);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleteConfirmation, setDeleteConfirmation] = useState('');
   const setAccountActive = async (customer, active) => {
     if (!customer.user_id || customer.account_active === active) return;
-    if (!active && !window.confirm(`Delete ${customer.name}'s login access? Their financial records will be retained, and access can be restored later.`)) return;
+    if (!active && !window.confirm(`Disable login access for ${customer.name}? Their financial records will be retained, and access can be restored later.`)) return;
     setWorking(customer.user_id);
     setError('');
     setMessage('');
@@ -885,15 +964,43 @@ function CustomerTable({ data, isAdmin, onDeactivate, onReactivate }) {
       setWorking(null);
     }
   };
+  const deleteCustomer = async event => {
+    event.preventDefault();
+    if (!deleteTarget || deleteConfirmation.trim().toLowerCase() !== deleteTarget.email.toLowerCase()) return;
+    setWorking(`delete:${deleteTarget.id}`);
+    setError('');
+    setMessage('');
+    try {
+      const result = await onDelete(deleteTarget.id, deleteConfirmation);
+      setMessage(`${deleteTarget.name} and ${result.invoices_deleted} invoices, ${result.payments_deleted} payments, and ${result.subscriptions_deleted} subscriptions were permanently deleted.`);
+      setDeleteTarget(null);
+      setDeleteConfirmation('');
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setWorking(null);
+    }
+  };
   return <section className="panel table-panel">
     <div className="list-toolbar"><div><b>{data.length} customers</b><span>Search by name, company, or email using the page search.</span></div></div>
-    {error && <p className="form-error" role="alert">{error}</p>}
+    {error && !deleteTarget && <p className="form-error" role="alert">{error}</p>}
     {message && <p className="signup-success" role="status">{message}</p>}
     <div className="table-wrap"><table><thead><tr><th>CUSTOMER</th><th>COMPANY</th><th>EMAIL</th><th>SUBSCRIPTIONS</th><th>OUTSTANDING</th>{isAdmin && <th>ACCOUNT</th>}</tr></thead><tbody>{data.length ? data.map(customer => <tr key={customer.email}>
       <td><span className="table-avatar">{customer.name.split(' ').map(x => x[0]).join('')}</span><b>{customer.name}</b></td><td>{customer.company}</td><td>{customer.email}</td><td>{customer.subscriptions}</td><td>{money(customer.balance)}</td>
-      {isAdmin && <td className="account-actions">{customer.user_id ? <><Badge>{customer.account_active ? 'Active' : 'Inactive'}</Badge><button className={`button small ${customer.account_active ? 'danger' : 'secondary'}`} disabled={working !== null} onClick={() => setAccountActive(customer, !customer.account_active)}>{working === customer.user_id ? 'Updating…' : customer.account_active ? 'Delete account' : 'Restore access'}</button></> : <span className="muted">No login account</span>}</td>}
+      {isAdmin && <td className="account-actions">{customer.user_id ? <><Badge>{customer.account_active ? 'Active' : 'Inactive'}</Badge><button className={`button small ${customer.account_active ? 'danger' : 'secondary'}`} disabled={working !== null} onClick={() => setAccountActive(customer, !customer.account_active)}>{working === customer.user_id ? 'Updating…' : customer.account_active ? 'Disable access' : 'Restore access'}</button></> : <span className="muted">No login account</span>}<button className="button danger small" disabled={working !== null} onClick={() => { setDeleteTarget(customer); setDeleteConfirmation(''); setError(''); }}>Delete permanently</button></td>}
     </tr>) : <tr><td colSpan={isAdmin ? 6 : 5} className="table-empty">No customers found.</td></tr>}</tbody></table></div>
-    {isAdmin && <p className="permission-note">Delete account removes login access only. Customer, subscription, invoice, and payment records are retained; admins can restore access later.</p>}
+    {isAdmin && <p className="permission-note">Disable access is reversible and retains billing history. Permanent deletion erases the customer login, profile, subscriptions, invoices, payments, and queued emails.</p>}
+    {deleteTarget && <div className="modal-backdrop"><section className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="delete-customer-title">
+      <button className="modal-close" type="button" aria-label="Close dialog" onClick={() => { setDeleteTarget(null); setDeleteConfirmation(''); }}>×</button>
+      <span className="eyebrow">PERMANENT ACTION</span><h2 id="delete-customer-title">Delete {deleteTarget.name}?</h2>
+      <p>This permanently removes the customer account and all linked subscriptions, invoices, payments, profile information, and queued emails. This cannot be undone.</p>
+      <p className="delete-confirm-label">Type <b>{deleteTarget.email}</b> to confirm.</p>
+      <form onSubmit={deleteCustomer}>
+        <label>Email confirmation<input autoFocus type="email" required value={deleteConfirmation} onChange={event => setDeleteConfirmation(event.target.value)} /></label>
+        {error && <p className="form-error" role="alert">{error}</p>}
+        <div className="form-actions"><button className="button danger" disabled={working !== null || deleteConfirmation.trim().toLowerCase() !== deleteTarget.email.toLowerCase()}>{working === `delete:${deleteTarget.id}` ? 'Deleting…' : 'Permanently delete'}</button><button type="button" className="button secondary" onClick={() => { setDeleteTarget(null); setDeleteConfirmation(''); }}>Keep account</button></div>
+      </form>
+    </section></div>}
   </section>;
 }
 function Marketplace({ plans, onSubscribe, onNavigate }) {
@@ -906,7 +1013,7 @@ function Marketplace({ plans, onSubscribe, onNavigate }) {
     setError('');
     try {
       const result = await onSubscribe(plan.id);
-      setMessage(`Subscription requested. Invoice ${result.invoice.number} has been created and emailed to you.`);
+      setMessage(`Subscription requested. Invoice ${result.invoice.number} has been created. The invoice email is queued; you can also pay from the Invoices page.`);
     } catch (requestError) {
       setError(requestError.message);
     } finally {
@@ -929,7 +1036,7 @@ function Marketplace({ plans, onSubscribe, onNavigate }) {
     <p className="permission-note">Requesting a plan creates an invoice. Your subscription becomes active after payment is recorded.</p>
   </>;
 }
-function PaymentInstructions({ instructions }) { return <section className="panel payment-instructions"><h2>Payment instructions</h2>{instructions?.upiId ? <><p>Pay via your UPI app to <b>{instructions.payeeName}</b>.</p><p className="upi-id">{instructions.upiId}</p><p>Include the invoice number as your payment reference. Your payment will be matched and recorded by the Brightloop team; this page does not confirm payments automatically.</p></> : <p>Contact Brightloop billing for UPI or bank-transfer instructions. Include your invoice number as the payment reference. Payments are confirmed after the team records them.</p>}</section>; }
+function PaymentInstructions({ instructions }) { return <section className="panel payment-instructions"><h2>How to pay</h2>{instructions?.upiId ? <><p>Open any UPI app and tap <b>Pay with UPI</b> beside an outstanding invoice. The payment request will include the invoice balance and invoice number.</p><p>Payee: <b>{instructions.payeeName}</b> · UPI ID: <b className="upi-id">{instructions.upiId}</b></p><p>After you complete the transfer, Brightloop staff will verify it and record the payment. Your invoice status updates after that; this site does not confirm UPI transfers automatically.</p></> : <p>UPI payments are not configured yet. Contact Brightloop billing for payment instructions. Include the invoice number as the payment reference. The invoice is marked paid after staff confirms receipt.</p>}</section>; }
 function Profile({ user, customer, isCustomer, onSave, onChangePassword }) {
   const [values, setValues] = useState({
     name: customer?.name || user.name,

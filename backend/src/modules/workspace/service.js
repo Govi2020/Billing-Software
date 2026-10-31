@@ -60,6 +60,7 @@ export async function getWorkspace(userId, role) {
       `SELECT i.id AS record_id, i.number AS id, c.name AS customer,
               to_char(i.invoice_date, 'DD Mon YYYY') AS date,
               to_char(i.due_date, 'DD Mon YYYY') AS due,
+              i.due_date::text AS record_due_date,
               i.total AS amount, i.amount_paid, i.total - i.amount_paid AS amount_due,
               i.sent_at,
               initcap(replace(i.status::text, '_', ' ')) AS status,
@@ -328,6 +329,7 @@ export async function getWorkspace(userId, role) {
     paymentInstructions: {
       upiId: config.PAYMENT_UPI_ID ?? null,
       payeeName: config.PAYMENT_PAYEE_NAME || 'Brightloop Software',
+      demoPaymentsEnabled: config.demoPaymentsEnabled,
     },
   };
 }

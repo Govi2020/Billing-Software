@@ -2,6 +2,8 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { requireAuth, requireRole } from '../../middleware/auth.js';
 import { validate } from '../../middleware/validate.js';
+import { drainEmailOutbox } from '../../jobs/email-outbox.js';
+import { pool } from '../../db/pool.js';
 import {
   confirmQuotation,
   deactivateCatalogRecord,
@@ -10,7 +12,9 @@ import {
   createTax,
   manageSubscription,
   createCustomer,
+  hardDeleteCustomer,
   createQuotation,
+  recordDemoPayment,
   recordPayment,
   updateProduct,
   updateDiscount,
@@ -39,6 +43,9 @@ const customerSchema = z.object({
   email: z.string().trim().email().max(254),
   company_name: z.string().trim().max(160).nullable().optional(),
   phone: z.string().trim().max(40).nullable().optional(),
+}).strict();
+const customerDeleteSchema = z.object({
+  confirmation: z.string().trim().email().max(254),
 }).strict();
 const profileSchema = z.object({
   name: z.string().trim().min(1).max(160),
@@ -141,6 +148,19 @@ const discountSchema = z.object({
 router.post('/customers', requireAuth, requireRole('admin', 'staff'), validate({ body: customerSchema }), async (req, res) => {
   const customer = await createCustomer(req.validated.body, req.auth.userId);
   res.status(201).json({ data: customer });
+});
+
+router.delete('/customers/:id', requireAuth, requireRole('admin'), validate({
+  params: idParams,
+  body: customerDeleteSchema,
+}), async (req, res) => {
+  res.json({
+    data: await hardDeleteCustomer(
+      req.validated.params.id,
+      req.validated.body.confirmation,
+      req.auth.userId,
+    ),
+  });
 });
 
 router.post('/products', requireAuth, requireRole('admin'), validate({ body: productSchema }), async (req, res) => {
@@ -260,6 +280,14 @@ router.post('/invoices/:id/payments', requireAuth, requireRole('admin', 'staff')
   res.status(201).json({ data: payment });
 });
 
+router.post('/invoices/:id/demo-payment', requireAuth, requireRole('customer'), validate({ params: idParams }), async (req, res) => {
+  const payment = await recordDemoPayment(req.validated.params.id, req.auth.userId);
+  await drainEmailOutbox(req.log, payment.outbox_id);
+  const { rows } = await pool.query(`SELECT status FROM email_outbox WHERE id = $1`, [payment.outbox_id]);
+  const { outbox_id: _outboxId, ...response } = payment;
+  res.status(201).json({ data: { ...response, receipt_status: rows[0]?.status || 'pending' } });
+});
+
 router.get('/invoices/:id', requireAuth, requireRole('admin', 'staff', 'customer'), validate({ params: idParams }), async (req, res) => {
   res.json({ data: await getInvoiceDetails(req.validated.params.id, req.auth.userId, req.auth.role) });
 });
@@ -282,13 +310,21 @@ router.post('/invoices/:id/confirm', requireAuth, requireRole('admin', 'staff'),
 router.post('/invoices/:id/send', requireAuth, requireRole('admin', 'staff'), validate({
   params: idParams,
 }), async (req, res) => {
-  res.json({ data: await emailInvoice(req.validated.params.id, req.auth.userId) });
+  const result = await emailInvoice(req.validated.params.id, req.auth.userId);
+  await drainEmailOutbox(req.log, result.outbox_id);
+  const { rows } = await pool.query(`SELECT status FROM email_outbox WHERE id = $1`, [result.outbox_id]);
+  const { outbox_id: _outboxId, ...response } = result;
+  res.json({ data: { ...response, delivery_status: rows[0]?.status || 'pending' } });
 });
 
 router.post('/invoices/:id/reminder', requireAuth, requireRole('admin', 'staff'), validate({
   params: idParams,
 }), async (req, res) => {
-  res.json({ data: await emailInvoice(req.validated.params.id, req.auth.userId, 'reminder') });
+  const result = await emailInvoice(req.validated.params.id, req.auth.userId, 'reminder');
+  await drainEmailOutbox(req.log, result.outbox_id);
+  const { rows } = await pool.query(`SELECT status FROM email_outbox WHERE id = $1`, [result.outbox_id]);
+  const { outbox_id: _outboxId, ...response } = result;
+  res.json({ data: { ...response, delivery_status: rows[0]?.status || 'pending' } });
 });
 
 export default router;

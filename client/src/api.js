@@ -39,7 +39,6 @@ export const api = {
     method: 'POST',
     body: JSON.stringify(details),
   }),
-  verifyEmail: token => request(`/auth/verify-email?${new URLSearchParams({ token })}`),
   forgotPassword: email => request('/auth/forgot-password', {
     method: 'POST',
     body: JSON.stringify({ email }),
@@ -168,6 +167,10 @@ export const api = {
     token,
     body: JSON.stringify(payment),
   }),
+  demoPayment: (token, invoiceId) => request(`/invoices/${invoiceId}/demo-payment`, {
+    method: 'POST',
+    token,
+  }),
   invoiceDetails: (token, invoiceId) => request(`/invoices/${invoiceId}`, { token }),
   cancelInvoice: (token, invoiceId, reason) => request(`/invoices/${invoiceId}/cancel`, {
     method: 'POST',
@@ -200,6 +203,11 @@ export const api = {
     method: 'POST',
     token,
     headers: { 'If-Match': updatedAt },
+  }),
+  hardDeleteCustomer: (token, customerId, confirmation) => request(`/customers/${customerId}`, {
+    method: 'DELETE',
+    token,
+    body: JSON.stringify({ confirmation }),
   }),
   updateCustomerProfile: (token, profile) => request('/me/customer', {
     method: 'PATCH',

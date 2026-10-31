@@ -25,6 +25,132 @@ export async function createCustomer(details, userId) {
   });
 }
 
+export async function hardDeleteCustomer(customerId, confirmation, actorId) {
+  return withTransaction(async db => {
+    const { rows } = await db.query(
+      `SELECT id, user_id, email
+         FROM customers
+        WHERE id = $1
+        FOR UPDATE`,
+      [customerId],
+    );
+    const customer = rows[0];
+    if (!customer) throw new AppError(404, 'CUSTOMER_NOT_FOUND', 'The customer does not exist.');
+    if (customer.email.trim().toLowerCase() !== confirmation.trim().toLowerCase()) {
+      throw new AppError(422, 'CONFIRMATION_MISMATCH', 'Enter the customer email address to confirm permanent deletion.');
+    }
+
+    let userId = null;
+    if (customer.user_id) {
+      const { rows: users } = await db.query(
+        `SELECT id, role FROM users WHERE id = $1 FOR UPDATE`,
+        [customer.user_id],
+      );
+      if (users[0]?.role !== 'customer') {
+        throw new AppError(409, 'ACCOUNT_NOT_CUSTOMER', 'Only customer login accounts can be permanently deleted here.');
+      }
+      userId = users[0].id;
+    }
+
+    const { rows: subscriptions } = await db.query(
+      `SELECT id, number FROM subscriptions WHERE customer_id = $1`,
+      [customer.id],
+    );
+    const subscriptionIds = subscriptions.map(subscription => subscription.id);
+    const subscriptionNumbers = subscriptions.map(subscription => subscription.number);
+    const { rows: invoices } = await db.query(
+      `SELECT id, number FROM invoices
+        WHERE customer_id = $1 OR subscription_id = ANY($2::bigint[])`,
+      [customer.id, subscriptionIds],
+    );
+    const invoiceIds = invoices.map(invoice => invoice.id);
+    const invoiceNumbers = invoices.map(invoice => invoice.number);
+    const { rows: paymentCount } = await db.query(
+      `SELECT count(*)::int AS count FROM payments WHERE invoice_id = ANY($1::bigint[])`,
+      [invoiceIds],
+    );
+
+    await db.query(
+      `DELETE FROM email_outbox
+        WHERE lower(to_email) = lower($1)
+          AND (
+            payload ->> 'invoice_number' = ANY($2::text[])
+            OR payload ->> 'subscription_number' = ANY($3::text[])
+            OR ($4::boolean AND template IN ('email_verification', 'password_reset', 'staff_invite'))
+          )`,
+      [customer.email, invoiceNumbers, subscriptionNumbers, Boolean(userId)],
+    );
+    if (subscriptionIds.length) {
+      await db.query(
+        `DELETE FROM discount_redemptions WHERE subscription_id = ANY($1::bigint[])`,
+        [subscriptionIds],
+      );
+    }
+    if (invoiceIds.length) {
+      await db.query(`DELETE FROM payments WHERE invoice_id = ANY($1::bigint[])`, [invoiceIds]);
+      await db.query(`DELETE FROM invoices WHERE id = ANY($1::bigint[])`, [invoiceIds]);
+    }
+    if (subscriptionIds.length) {
+      await db.query(`DELETE FROM subscriptions WHERE id = ANY($1::bigint[])`, [subscriptionIds]);
+    }
+
+    if (userId) {
+      await db.query(
+        `UPDATE audit_log
+            SET actor_id = NULL, details = '{}'::jsonb
+          WHERE actor_id = $1 OR (entity_type = 'user' AND entity_id = $1)`,
+        [userId],
+      );
+      await db.query(`UPDATE customers SET created_by = NULL WHERE created_by = $1`, [userId]);
+      await db.query(`UPDATE users SET created_by = NULL WHERE created_by = $1`, [userId]);
+      await db.query(`UPDATE products SET created_by = NULL WHERE created_by = $1`, [userId]);
+      await db.query(`UPDATE plans SET created_by = NULL WHERE created_by = $1`, [userId]);
+      await db.query(`UPDATE quotation_templates SET created_by = NULL WHERE created_by = $1`, [userId]);
+      await db.query(
+        `UPDATE subscriptions SET salesperson_id = NULL, created_by = NULL WHERE salesperson_id = $1 OR created_by = $1`,
+        [userId],
+      );
+      await db.query(`UPDATE subscription_status_history SET changed_by = NULL WHERE changed_by = $1`, [userId]);
+      await db.query(
+        `UPDATE invoices SET created_by = NULL, cancelled_by = NULL WHERE created_by = $1 OR cancelled_by = $1`,
+        [userId],
+      );
+      await db.query(`UPDATE payments SET recorded_by = NULL WHERE recorded_by = $1`, [userId]);
+      await db.query(`UPDATE billing_runs SET requested_by = NULL WHERE requested_by = $1`, [userId]);
+      await db.query(`UPDATE workspace_settings SET updated_by = NULL WHERE updated_by = $1`, [userId]);
+      await db.query(`DELETE FROM idempotency_keys WHERE actor_id = $1`, [userId]);
+    }
+
+    await db.query(
+      `UPDATE audit_log
+          SET details = '{}'::jsonb
+        WHERE (entity_type = 'customer' AND entity_id = $1)
+           OR (entity_type = 'subscription' AND entity_id = ANY($2::bigint[]))
+           OR (entity_type = 'invoice' AND entity_id = ANY($3::bigint[]))`,
+      [customer.id, subscriptionIds, invoiceIds],
+    );
+    await db.query(
+      `INSERT INTO audit_log (actor_id, action, entity_type, entity_id, details)
+       VALUES ($1, 'customer.hard_delete', 'customer', $2, $3::jsonb)`,
+      [actorId, customer.id, JSON.stringify({
+        subscriptions: subscriptionIds.length,
+        invoices: invoiceIds.length,
+        payments: paymentCount[0].count,
+        login_deleted: Boolean(userId),
+      })],
+    );
+    await db.query(`DELETE FROM customers WHERE id = $1`, [customer.id]);
+    if (userId) await db.query(`DELETE FROM users WHERE id = $1`, [userId]);
+    return {
+      id: customer.id,
+      deleted: true,
+      subscriptions_deleted: subscriptionIds.length,
+      invoices_deleted: invoiceIds.length,
+      payments_deleted: paymentCount[0].count,
+    };
+  });
+}
+
 export async function createProduct(details, userId) {
   return withTransaction(async db => {
     const { rows } = await db.query(
@@ -534,82 +660,107 @@ export async function manageSubscription(subscriptionId, action, userId, role) {
   });
 }
 
-export async function recordPayment(invoiceId, details, userId) {
-  return withTransaction(async db => {
-    const { rows: dateRows } = await db.query(
-      `SELECT $1::date <= current_date AS allowed`,
-      [details.payment_date],
-    );
-    if (!dateRows[0].allowed) {
-      throw new AppError(422, 'FUTURE_PAYMENT_DATE', 'Payment date cannot be in the future.');
-    }
-    await db.query(`SELECT set_config('app.user_id', $1, true)`, [String(userId)]);
-    const { rows } = await db.query(
-      `SELECT i.id, i.number, i.status, i.total, i.amount_paid, i.subscription_id,
-              c.name AS customer_name, c.email AS customer_email,
-              s.status AS subscription_status, i.period_end
-         FROM invoices i
-         JOIN subscriptions s ON s.id = i.subscription_id
-         JOIN customers c ON c.id = i.customer_id
-        WHERE i.id = $1
-        FOR UPDATE OF i`,
-      [invoiceId],
-    );
-    const invoice = rows[0];
-    if (!invoice) throw new AppError(404, 'INVOICE_NOT_FOUND', 'The invoice does not exist.');
-    if (invoice.status !== 'confirmed') {
-      throw new AppError(409, 'INVOICE_NOT_PAYABLE', 'Only confirmed, unpaid invoices can receive a payment.');
-    }
-    if (details.amount > Number(invoice.total) - Number(invoice.amount_paid)) {
-      throw new AppError(422, 'OVERPAYMENT', 'Payment amount cannot exceed the invoice balance.');
-    }
+async function recordPaymentInTransaction(db, invoiceId, details, userId, customerUserId = null) {
+  const { rows: dateRows } = await db.query(
+    `SELECT $1::date <= current_date AS allowed`,
+    [details.payment_date],
+  );
+  if (!dateRows[0].allowed) {
+    throw new AppError(422, 'FUTURE_PAYMENT_DATE', 'Payment date cannot be in the future.');
+  }
+  await db.query(`SELECT set_config('app.user_id', $1, true)`, [String(userId)]);
+  const { rows } = await db.query(
+    `SELECT i.id, i.number, i.status, i.total, i.amount_paid, i.subscription_id,
+            c.name AS customer_name, c.email AS customer_email,
+            s.status AS subscription_status, i.period_end
+       FROM invoices i
+       JOIN subscriptions s ON s.id = i.subscription_id
+       JOIN customers c ON c.id = i.customer_id
+      WHERE i.id = $1 AND ($2::bigint IS NULL OR c.user_id = $2)
+      FOR UPDATE OF i`,
+    [invoiceId, customerUserId],
+  );
+  const invoice = rows[0];
+  if (!invoice) throw new AppError(404, 'INVOICE_NOT_FOUND', 'The invoice does not exist.');
+  if (invoice.status !== 'confirmed') {
+    throw new AppError(409, 'INVOICE_NOT_PAYABLE', 'Only confirmed, unpaid invoices can receive a payment.');
+  }
+  const amount = customerUserId === null
+    ? details.amount
+    : Number((Number(invoice.total) - Number(invoice.amount_paid)).toFixed(2));
+  if (amount <= 0) throw new AppError(409, 'INVOICE_NOT_OUTSTANDING', 'This invoice has no remaining balance.');
+  if (amount > Number(invoice.total) - Number(invoice.amount_paid)) {
+    throw new AppError(422, 'OVERPAYMENT', 'Payment amount cannot exceed the invoice balance.');
+  }
 
-    const { rows: paymentRows } = await db.query(
-      `INSERT INTO payments (invoice_id, method, amount, payment_date, reference, note, recorded_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
-       RETURNING id, invoice_id, method, amount, payment_date`,
-      [
-        invoice.id,
-        details.method,
-        details.amount,
-        details.payment_date,
-        details.reference || null,
-        details.note || null,
-        userId,
-      ],
-    );
-    const payment = paymentRows[0];
-    const { rows: updatedInvoiceRows } = await db.query(
-      `SELECT status, amount_paid FROM invoices WHERE id = $1`,
-      [invoice.id],
-    );
-    const balance = Number(invoice.total) - Number(updatedInvoiceRows[0].amount_paid);
-    await enqueueEmail(db, {
-      to: invoice.customer_email,
-      template: 'payment_receipt',
-      payload: {
-        full_name: invoice.customer_name,
-        invoice_number: invoice.number,
-        payment_amount: details.amount,
-        payment_date: details.payment_date,
-        payment_method: details.method,
-        balance,
-        url: `${config.APP_BASE_URL}/`,
-      },
-      dedupeKey: `payment:${payment.id}:receipt`,
-    });
-    if (updatedInvoiceRows[0].status === 'paid' && invoice.subscription_status === 'confirmed') {
-      await db.query(
-        `UPDATE subscriptions SET status = 'active', next_invoice_date = $2::date + 1
-          WHERE id = $1 AND status = 'confirmed'`,
-        [invoice.subscription_id, invoice.period_end],
-      );
-    }
-    await db.query(
-      `INSERT INTO audit_log (actor_id, action, entity_type, entity_id, details)
-       VALUES ($1, 'payment.create', 'payment', $2, $3::jsonb)`,
-      [userId, payment.id, JSON.stringify({ invoice_id: invoice.id, amount: details.amount, method: details.method })],
-    );
-    return { ...payment, invoice_status: updatedInvoiceRows[0].status, amount_paid: updatedInvoiceRows[0].amount_paid };
+  const { rows: paymentRows } = await db.query(
+    `INSERT INTO payments (invoice_id, method, amount, payment_date, reference, note, recorded_by)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
+     RETURNING id, invoice_id, method, amount, payment_date`,
+    [
+      invoice.id,
+      customerUserId === null ? details.method : 'card',
+      amount,
+      details.payment_date,
+      customerUserId === null ? details.reference || null : `DEMO-${invoice.number}`,
+      customerUserId === null ? details.note || null : 'Simulated demo payment; no funds transferred.',
+      userId,
+    ],
+  );
+  const payment = paymentRows[0];
+  const { rows: updatedInvoiceRows } = await db.query(
+    `SELECT status, amount_paid FROM invoices WHERE id = $1`,
+    [invoice.id],
+  );
+  const balance = Number(invoice.total) - Number(updatedInvoiceRows[0].amount_paid);
+  const receipt = await enqueueEmail(db, {
+    to: invoice.customer_email,
+    template: 'payment_receipt',
+    payload: {
+      full_name: invoice.customer_name,
+      invoice_number: invoice.number,
+      payment_amount: amount,
+      payment_date: details.payment_date,
+      payment_method: customerUserId === null ? details.method : 'card',
+      balance,
+      url: `${config.APP_BASE_URL}/`,
+    },
+    dedupeKey: `payment:${payment.id}:receipt`,
   });
+  if (updatedInvoiceRows[0].status === 'paid' && invoice.subscription_status === 'confirmed') {
+    await db.query(
+      `UPDATE subscriptions SET status = 'active', next_invoice_date = $2::date + 1
+        WHERE id = $1 AND status = 'confirmed'`,
+      [invoice.subscription_id, invoice.period_end],
+    );
+  }
+  await db.query(
+    `INSERT INTO audit_log (actor_id, action, entity_type, entity_id, details)
+     VALUES ($1, $2, 'payment', $3, $4::jsonb)`,
+    [userId, customerUserId === null ? 'payment.create' : 'payment.demo_simulate', payment.id, JSON.stringify({
+      invoice_id: invoice.id,
+      amount,
+      method: customerUserId === null ? details.method : 'demo',
+      simulated: customerUserId !== null,
+    })],
+  );
+  return {
+    ...payment,
+    invoice_status: updatedInvoiceRows[0].status,
+    amount_paid: updatedInvoiceRows[0].amount_paid,
+    outbox_id: receipt.id,
+  };
+}
+
+export async function recordPayment(invoiceId, details, userId) {
+  return withTransaction(db => recordPaymentInTransaction(db, invoiceId, details, userId));
+}
+
+export async function recordDemoPayment(invoiceId, userId) {
+  if (!config.demoPaymentsEnabled) {
+    throw new AppError(404, 'NOT_FOUND', 'Demo payments are not enabled.');
+  }
+  return withTransaction(db => recordPaymentInTransaction(db, invoiceId, {
+    payment_date: businessDate(),
+  }, userId, userId));
 }

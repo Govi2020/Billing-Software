@@ -10,8 +10,6 @@ export const loginSchema = z.object({ email, password }).strict();
 export const emailSchema = z.object({ email }).strict();
 export const resetSchema = z.object({ token: z.string().min(32), newPassword: password }).strict();
 export const changePasswordSchema = z.object({ currentPassword: password, newPassword: password }).strict();
-export const verifyEmailSchema = z.object({ token: z.string().min(32) }).strict();
-export const verifyEmailQuerySchema = z.object({ token: z.string().min(32) }).strict();
 export const listUsersSchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(50),

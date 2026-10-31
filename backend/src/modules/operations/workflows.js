@@ -326,7 +326,7 @@ export async function emailInvoice(invoiceId, actorId, mode = 'send') {
     const dedupeKey = mode === 'reminder'
       ? `invoice:${invoiceId}:reminder:${new Date().toISOString().slice(0, 10)}`
       : `invoice:${invoiceId}:send`;
-    await enqueueEmail(db, {
+    const email = await enqueueEmail(db, {
       to: invoice.customer_email,
       template,
       payload: {
@@ -351,7 +351,12 @@ export async function emailInvoice(invoiceId, actorId, mode = 'send') {
        VALUES ($1, $2, 'invoice', $3, $4::jsonb)`,
       [actorId, `invoice.${mode}`, invoiceId, JSON.stringify({ to: invoice.customer_email })],
     );
-    return { id: invoiceId, queued: true, sent_to: invoice.customer_email };
+    return {
+      id: invoiceId,
+      queued: email.status !== 'sent',
+      sent_to: invoice.customer_email,
+      outbox_id: email.id,
+    };
   });
 }
 

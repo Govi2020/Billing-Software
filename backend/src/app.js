@@ -80,7 +80,16 @@ export function createApp(logger) {
   app.use((error, req, res, _next) => {
     const mapped = mapDatabaseError(error);
     const status = mapped.status ?? 500;
-    if (status >= 500) logger.error({ errorCode: error.code ?? error.name, requestId: req.id }, 'Request failed');
+    if (status >= 500) logger.error({
+      errorCode: error.code ?? error.name,
+      databaseConstraint: error.constraint,
+      requestId: req.id,
+    }, 'Request failed');
+    else if (error.code === '23503') logger.warn({
+      errorCode: error.code,
+      databaseConstraint: error.constraint,
+      requestId: req.id,
+    }, 'Database reference conflict');
     res.status(status).json({
       error: {
         code: mapped.code ?? 'INTERNAL_ERROR',

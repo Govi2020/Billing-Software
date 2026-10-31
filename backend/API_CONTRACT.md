@@ -6,8 +6,7 @@ Base path: `/api/v1`. JSON responses use `{ "data": ... }`; errors use `{ "error
 
 | Method | Path | Auth/roles | Request | Success response | Errors |
 |---|---|---|---|---|---|
-| POST | `/auth/signup` | Public | `{full_name,email,password}` | 201 `{data: user}`; verification email queued | 409 email taken; 422 invalid fields/password; 429 |
-| GET | `/auth/verify-email?token=` | Public | One-time token in query from the verification email | `{data:{verified:true}}`; the email links to the frontend confirmation page, which calls this endpoint | 422 invalid/expired token |
+| POST | `/auth/signup` | Public | `{full_name,email,password}` | 201 `{data: user}`; account can sign in immediately and matching customer profile is linked | 409 email taken/profile ambiguous; 422 invalid fields/password; 429 |
 | POST | `/auth/login` | Public | `{email,password}` | `{data:{accessToken,user}}`; refresh cookie set | 401 invalid credentials; 403 email unverified; 429 |
 | POST | `/auth/refresh` | Refresh cookie + `X-CSRF-Token` matching `brightloop_csrf` cookie | No body | `{data:{accessToken,user}}`; rotated refresh cookie | 401 invalid/reused token; 403 CSRF |
 | POST | `/auth/logout` | Any authenticated role | No body | 204; refresh family revoked | 401 |
@@ -79,6 +78,7 @@ Discount rules can target the whole subscription or selected products.
 | Method | Path | Auth/roles | Request | Success response |
 |---|---|---|---|---|
 | POST | `/customers` | Admin, staff | `{name,email,company_name,phone}` | 201 `{data:customer}` |
+| DELETE | `/customers/:id` | Admin | `{confirmation:customer_email}` | Deletes customer login/profile, subscriptions, invoices, payments, and queued emails; preserves a scrubbed audit entry |
 | PATCH | `/me/customer` | Customer | Editable billing profile fields | `{data:customer}` |
 | POST | `/subscriptions` | Admin, staff | `{customer_id,plan_id}` | 201 `{data:quotation}` |
 | POST | `/subscriptions/:id/confirm` | Admin, staff | No body | `{data:{subscription,invoice}}`; invoice email queued |
@@ -97,8 +97,8 @@ Discount rules can target the whole subscription or selected products.
 | GET | `/invoices/:id` | Admin, staff, owning customer | — | Invoice snapshot, lines, and payment history |
 | POST | `/invoices/:id/confirm` | Admin, staff | No body | Confirms draft invoice |
 | POST | `/invoices/:id/cancel` | Admin, staff | `{reason}` | Cancels an unpaid draft/confirmed invoice |
-| POST | `/invoices/:id/send` | Admin, staff | No body | Queues invoice email |
-| POST | `/invoices/:id/reminder` | Admin, staff | No body | Queues outstanding-balance reminder |
+| POST | `/invoices/:id/send` | Admin, staff | No body | Attempts immediate delivery; response includes `delivery_status` |
+| POST | `/invoices/:id/reminder` | Admin, staff | No body | Attempts immediate delivery of outstanding-balance reminder; response includes `delivery_status` |
 | POST | `/billing/runs` | Admin | `{as_of_date?}` | 201 `{data:run}`; runs catch-up billing |
 | GET | `/billing/runs` | Admin | — | Latest 100 billing runs and errors |
 | GET | `/billing/reconciliation` | Admin | — | Invoice, payment, and due-subscription checks |

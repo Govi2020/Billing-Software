@@ -67,7 +67,6 @@ function emailContent(template, payload) {
   }
 
   const templates = {
-    email_verification: ['Verify your Brightloop account', 'verify your email'],
     password_reset: ['Reset your Brightloop password', 'reset your password'],
     staff_invite: ['Your Brightloop staff account', 'set your password and activate your staff account'],
   };

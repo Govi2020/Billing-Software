@@ -44,7 +44,6 @@ export async function signup(input) {
   const email = input.email.trim().toLowerCase();
   assertPasswordPolicy(input.password, [email, input.full_name]);
   const passwordHash = await hashPassword(input.password);
-  const rawToken = newOpaqueToken();
   let result;
   try {
     result = await withTransaction(async db => {
@@ -52,39 +51,32 @@ export async function signup(input) {
       if (existing) throw new AppError(409, 'EMAIL_TAKEN', 'An account with this email already exists.');
 
       const { rows: userRows } = await db.query(
-        `INSERT INTO users (email, password_hash, full_name, role)
-         VALUES ($1, $2, $3, 'customer')
+        `INSERT INTO users (email, password_hash, full_name, role, email_verified_at)
+         VALUES ($1, $2, $3, 'customer', now())
          RETURNING id, email, full_name, role, is_active, must_change_password, email_verified_at, last_login_at, created_at, updated_at`,
         [email, passwordHash, input.full_name.trim()],
       );
       const user = userRows[0];
 
-      // Existing staff-created customer records are linked only after verification.
       const { rows: customers } = await db.query(
-        `SELECT id FROM customers WHERE lower(email) = $1 AND user_id IS NULL ORDER BY id LIMIT 2 FOR UPDATE`,
+        `SELECT id FROM customers WHERE lower(email) = $1 AND user_id IS NULL ORDER BY id FOR UPDATE`,
         [email],
       );
       if (customers.length > 1) {
-        throw new AppError(409, 'CUSTOMER_LINK_AMBIGUOUS', 'Contact support to verify this email before creating an account.');
+        throw new AppError(409, 'CUSTOMER_LINK_AMBIGUOUS', 'More than one customer profile uses this email. Ask an administrator to merge the profiles before signing up.');
       }
-      if (!customers.length) {
+      if (customers.length) {
+        await db.query(
+          `UPDATE customers SET user_id = $1, name = $2, updated_at = now() WHERE id = $3`,
+          [user.id, user.full_name, customers[0].id],
+        );
+      } else {
         await db.query(
           `INSERT INTO customers (user_id, name, email) VALUES ($1, $2, $3)`,
           [user.id, user.full_name, user.email],
         );
       }
 
-      await db.query(
-        `INSERT INTO email_verification_tokens (user_id, token_hash, expires_at)
-         VALUES ($1, $2, now() + interval '24 hours')`,
-        [user.id, hashToken(rawToken)],
-      );
-      await enqueueEmail(db, {
-        to: email,
-        template: 'email_verification',
-        payload: { full_name: user.full_name, url: `${config.APP_BASE_URL}/verify-email?token=${encodeURIComponent(rawToken)}` },
-        dedupeKey: `verify:${user.id}:${hashToken(rawToken)}`,
-      });
       return user;
     });
   } catch (error) {
@@ -92,27 +84,6 @@ export async function signup(input) {
     throw error;
   }
   return publicUser(result);
-}
-
-export async function verifyEmail(rawToken) {
-  const tokenHash = hashToken(rawToken);
-  return withTransaction(async db => {
-    const { rows } = await db.query(
-      `UPDATE email_verification_tokens
-          SET used_at = now()
-        WHERE token_hash = $1 AND used_at IS NULL AND expires_at > now()
-        RETURNING user_id`,
-      [tokenHash],
-    );
-    if (!rows[0]) throw new AppError(422, 'INVALID_OR_EXPIRED_TOKEN', 'The verification link is invalid or expired.');
-    await db.query(`UPDATE users SET email_verified_at = now() WHERE id = $1`, [rows[0].user_id]);
-    await db.query(
-      `UPDATE customers SET user_id = $1
-        WHERE lower(email) = (SELECT lower(email) FROM users WHERE id = $1) AND user_id IS NULL`,
-      [rows[0].user_id],
-    );
-    return { verified: true };
-  });
 }
 
 export async function login(input, req, res) {
@@ -132,10 +103,6 @@ export async function login(input, req, res) {
     }
     throw new AppError(401, 'INVALID_CREDENTIALS', 'Email or password is incorrect.');
   }
-  if (!user.email_verified_at) {
-    throw new AppError(403, 'EMAIL_NOT_VERIFIED', 'Verify your email before signing in.');
-  }
-
   const rawRefresh = newOpaqueToken();
   const familyId = newFamilyId();
   const updated = await withTransaction(async db => {

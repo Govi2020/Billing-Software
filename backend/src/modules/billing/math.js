@@ -33,7 +33,7 @@ export function allocateDiscount(amount, eligibleLines) {
   });
   let remainder = cappedAmount - shares.reduce((sum, share) => sum + share.allocated, 0n);
   shares.sort((left, right) => left.remainder === right.remainder
-    ? left.line.sort_order - right.line.sort_order || left.line.id - right.line.id
+    ? left.line.sort_order - right.line.sort_order || (left.line.id ?? 0) - (right.line.id ?? 0)
     : left.remainder > right.remainder ? -1 : 1);
   for (const share of shares) {
     if (remainder === 0n) break;
@@ -53,7 +53,7 @@ export function calculateInvoiceLines(lines, discounts) {
     const subtotalCents = BigInt(line.quantity) * moneyToCents(line.unit_price);
     return {
       ...line,
-      id: Number(line.id ?? index),
+      id: line.id == null ? null : Number(line.id),
       sort_order: Number(line.sort_order ?? index),
       subtotalCents,
       discountCents: 0n,

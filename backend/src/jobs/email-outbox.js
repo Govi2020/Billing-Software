@@ -3,7 +3,7 @@ import { sendOutboxMessage } from '../services/email.js';
 
 let draining = false;
 
-export async function drainEmailOutbox(logger) {
+export async function drainEmailOutbox(logger, messageId = null) {
   if (draining) return;
   draining = true;
   try {
@@ -11,8 +11,10 @@ export async function drainEmailOutbox(logger) {
       const result = await withTransaction(async client => {
         const { rows } = await client.query(
           `SELECT id, to_email, template, payload
-             FROM email_outbox WHERE status = 'pending'
+              FROM email_outbox
+             WHERE status = 'pending' AND ($1::bigint IS NULL OR id = $1)
              ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED`,
+          [messageId],
         );
         const message = rows[0];
         if (!message) return 'empty';

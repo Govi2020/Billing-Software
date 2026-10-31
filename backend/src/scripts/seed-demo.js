@@ -26,6 +26,8 @@ const demoUsers = [
   { email: 'staff@brightloop.test', name: 'Rohan Mehta', role: 'staff' },
   { email: 'customer@brightloop.test', name: 'Priya Shah', role: 'customer' },
 ];
+const legacyDemoCustomerEmails = Array.from({ length: 10 }, (_, index) =>
+  `demo.customer${String(index + 1).padStart(2, '0')}@brightloop.test`);
 const demoProducts = [
   ['Brightloop CRM', 'software', 1299, 390],
   ['Brightloop Cloud Storage', 'service', 499, 120],
@@ -65,26 +67,18 @@ const demoPlans = [
   ['Developer Tools Annual', 13999, 'yearly', 1],
   ['All-in-One Workspace', 4999, 'monthly', 1],
 ];
-const demoCustomers = [
-  ['Aarav Nair', 'Northstar Retail', 'demo.customer01@brightloop.test'],
-  ['Meera Iyer', 'Paper Kite Studio', 'demo.customer02@brightloop.test'],
-  ['Kabir Singh', 'Copperline Labs', 'demo.customer03@brightloop.test'],
-  ['Sana Khan', 'Fieldnote Foods', 'demo.customer04@brightloop.test'],
-  ['Ishaan Das', 'Juniper Works', 'demo.customer05@brightloop.test'],
-  ['Tara Menon', 'Orbit Learning', 'demo.customer06@brightloop.test'],
-  ['Dev Patel', 'Blue Fern Health', 'demo.customer07@brightloop.test'],
-  ['Anaya Bose', 'Goodday Logistics', 'demo.customer08@brightloop.test'],
-  ['Rehan Ali', 'Mosaic Media', 'demo.customer09@brightloop.test'],
-  ['Nila George', 'Riverbend Finance', 'demo.customer10@brightloop.test'],
-];
-
 try {
   await withTransaction(async db => {
     for (const user of demoUsers) {
       await db.query(
         `INSERT INTO users (email, password_hash, full_name, role, email_verified_at)
          VALUES ($1, $2, $3, $4, now())
-         ON CONFLICT ((lower(email))) DO NOTHING`,
+         ON CONFLICT ((lower(email))) DO UPDATE
+           SET password_hash = EXCLUDED.password_hash,
+               full_name = EXCLUDED.full_name,
+               role = EXCLUDED.role,
+               is_active = TRUE,
+               email_verified_at = now()`,
         [user.email, hash, user.name, user.role],
       );
     }
@@ -147,45 +141,73 @@ try {
       plans.push(rows[0]);
     }
 
-    const customers = [];
-    for (const [name, companyName, email] of demoCustomers) {
-      const { rows: existing } = await db.query(
-        `SELECT id FROM customers WHERE lower(email) = lower($1) ORDER BY id LIMIT 1`,
-        [email],
-      );
-      if (existing[0]) {
-        customers.push(existing[0]);
-        continue;
-      }
-      const { rows } = await db.query(
-        `INSERT INTO customers (name, company_name, email, country, created_by)
-         VALUES ($1, $2, $3, 'IN', $4)
-         RETURNING id`,
-        [name, companyName, email, adminId],
-      );
-      customers.push(rows[0]);
-    }
-
     const { rows: portalCustomerRows } = await db.query(
       `SELECT id FROM customers WHERE lower(email) = lower('customer@brightloop.test') ORDER BY id LIMIT 1`,
     );
-    const customerTargets = [portalCustomerRows[0], portalCustomerRows[0], portalCustomerRows[0], ...customers];
+    if (!portalCustomerRows[0]) throw new Error('Could not create or find the demo customer profile.');
+    const portalCustomer = portalCustomerRows[0];
+    const fixtureCustomerIds = [portalCustomer.id];
+    if (legacyDemoCustomerEmails.length) {
+      const { rows: legacyCustomers } = await db.query(
+        `SELECT id FROM customers WHERE lower(email) = ANY($1::text[])`,
+        [legacyDemoCustomerEmails],
+      );
+      fixtureCustomerIds.push(...legacyCustomers.map(customer => customer.id));
+    }
+
+    const { rows: fixtureSubscriptions } = await db.query(
+      `SELECT s.id
+         FROM subscriptions s
+         LEFT JOIN plans p ON p.id = s.plan_id
+        WHERE s.customer_id = ANY($1::bigint[])
+          AND (
+            s.customer_id <> $2
+            OR p.name = ANY($3::text[])
+          )`,
+      [fixtureCustomerIds, portalCustomer.id, demoPlans.map(([name]) => name)],
+    );
+    const fixtureSubscriptionIds = fixtureSubscriptions.map(subscription => subscription.id);
+    if (fixtureSubscriptionIds.length) {
+      await db.query(
+        `DELETE FROM payments
+          WHERE invoice_id IN (
+            SELECT id FROM invoices WHERE subscription_id = ANY($1::bigint[])
+          )`,
+        [fixtureSubscriptionIds],
+      );
+      await db.query(
+        `DELETE FROM discount_redemptions WHERE subscription_id = ANY($1::bigint[])`,
+        [fixtureSubscriptionIds],
+      );
+      await db.query(
+        `DELETE FROM invoices WHERE subscription_id = ANY($1::bigint[])`,
+        [fixtureSubscriptionIds],
+      );
+      await db.query(
+        `DELETE FROM subscriptions WHERE id = ANY($1::bigint[])`,
+        [fixtureSubscriptionIds],
+      );
+    }
+    if (fixtureCustomerIds.length > 1) {
+      await db.query(
+        `DELETE FROM customers WHERE id = ANY($1::bigint[]) AND id <> $2`,
+        [fixtureCustomerIds, portalCustomer.id],
+      );
+    }
+
     await db.query(`SELECT set_config('app.user_id', $1, true)`, [String(adminId)]);
     for (let index = 0; index < plans.length; index += 1) {
-      const customer = customerTargets[index % customerTargets.length];
+      const customer = portalCustomer;
       const plan = plans[index];
-      const { rows: existing } = await db.query(
-        `SELECT id, status FROM subscriptions WHERE customer_id = $1 AND plan_id = $2 ORDER BY id LIMIT 1`,
-        [customer.id, plan.id],
-      );
-      if (existing[0]) continue;
 
       const { rows: planRows } = await db.query(
         `SELECT p.price, p.billing_period, p.min_quantity FROM plans p WHERE p.id = $1`,
         [plan.id],
       );
       const planDetails = planRows[0];
-      const desiredStatus = index % 7 === 0 ? 'quotation' : index % 4 === 0 ? 'confirmed' : 'active';
+      const desiredStatus = [0, 8, 17].includes(index)
+        ? 'quotation'
+        : index % 4 === 0 ? 'confirmed' : 'active';
       const { rows: subscriptionRows } = await db.query(
         `INSERT INTO subscriptions (
            customer_id, plan_id, payment_term_id, status, start_date, expiry_date,
@@ -218,18 +240,21 @@ try {
       if (desiredStatus === 'quotation') continue;
 
       const amount = Number(planDetails.price) * planDetails.min_quantity;
+      const monthsAgo = Math.floor(index / 3);
       const { rows: invoiceRows } = await db.query(
         `INSERT INTO invoices (
            subscription_id, customer_id, status, invoice_date, due_date, period_start, period_end,
            bill_to_name, subtotal, tax_total, total, created_by
          )
          SELECT $1, c.id, 'draft',
-                CASE WHEN $3::int % 3 = 0 THEN current_date - 20 ELSE current_date - 3 END,
-                CASE WHEN $3::int % 3 = 0 THEN current_date - 5 ELSE current_date + 12 END,
-                current_date - 30, current_date + 30, c.name, $4, 0, $4, $5
+                current_date - ($3::int * interval '1 month') - interval '3 days',
+                current_date - ($3::int * interval '1 month') + interval '12 days',
+                current_date - ($3::int * interval '1 month') - interval '3 days',
+                current_date - ($3::int * interval '1 month') + interval '27 days',
+                c.name, $4, 0, $4, $5
            FROM customers c WHERE c.id = $2
          RETURNING id`,
-        [subscriptionId, customer.id, String(index), amount, adminId],
+        [subscriptionId, customer.id, String(monthsAgo), amount, adminId],
       );
       const invoiceId = invoiceRows[0].id;
       await db.query(
@@ -242,11 +267,17 @@ try {
           WHERE id = $1`,
         [invoiceId],
       );
-      if (index % 3 === 1) {
+      if ([1, 4, 7, 10, 13, 16].includes(index)) {
         await db.query(
           `INSERT INTO payments (invoice_id, method, amount, payment_date, reference, recorded_by)
-           VALUES ($1, 'upi', $2, current_date - 2, $3, $4)`,
-          [invoiceId, amount, `DEMO-UPI-${String(index + 1).padStart(3, '0')}`, adminId],
+           VALUES ($1, 'upi', $2, current_date - ($3::int * interval '1 month') - interval '1 day', $4, $5)`,
+          [invoiceId, amount, String(monthsAgo), `DEMO-UPI-${String(index + 1).padStart(3, '0')}`, adminId],
+        );
+      } else if (index === 2) {
+        await db.query(
+          `INSERT INTO payments (invoice_id, method, amount, payment_date, reference, recorded_by)
+           VALUES ($1, 'upi', $2, current_date - 1, 'DEMO-UPI-PARTIAL', $3)`,
+          [invoiceId, Number((amount * 0.4).toFixed(2)), adminId],
         );
       }
     }
@@ -267,7 +298,7 @@ try {
       );
     }
   });
-  console.info('Demo accounts, catalog, customers, subscriptions, invoices, and payments seeded. Credentials were not printed.');
+  console.info('Demo accounts, catalog, subscriptions, invoices, and payments seeded for the three judge accounts. Credentials were not printed.');
 } finally {
   await pool.end();
 }

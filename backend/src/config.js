@@ -28,6 +28,7 @@ const envSchema = z.object({
   BREVO_SENDER_NAME: z.string().max(160).default('Brightloop Software'),
   PAYMENT_UPI_ID: z.string().max(100).optional(),
   PAYMENT_PAYEE_NAME: z.string().max(160).optional(),
+  DEMO_PAYMENTS_ENABLED: z.enum(['true', 'false']).default('false'),
   DEMO_SEED_PASSWORD: z.string().optional(),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
 });
@@ -36,6 +37,10 @@ const parsed = envSchema.safeParse(process.env);
 if (!parsed.success) {
   // Do not print values: configuration errors can include credentials.
   console.error('Invalid backend environment configuration:', parsed.error.issues.map(issue => issue.path.join('.')).join(', '));
+  process.exit(1);
+}
+if (parsed.data.NODE_ENV === 'production' && parsed.data.DEMO_PAYMENTS_ENABLED === 'true') {
+  console.error('Invalid backend environment configuration: DEMO_PAYMENTS_ENABLED cannot be true in production');
   process.exit(1);
 }
 
@@ -54,6 +59,7 @@ try {
 export const config = Object.freeze({
   ...parsed.data,
   previousJwtKeys,
+  demoPaymentsEnabled: parsed.data.DEMO_PAYMENTS_ENABLED === 'true',
   cookieSecure: parsed.data.COOKIE_SECURE === undefined
     ? parsed.data.NODE_ENV === 'production'
     : parsed.data.COOKIE_SECURE === 'true',
